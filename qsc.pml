@@ -132,6 +132,13 @@ proctype NodeProc(byte n) {
 			printf("%d round %d definitely committed\n", n, rnd);
 
 			// Make sure all nodes actually agreed
+			// XXX doesn't properly implement eligibility
+			for (nn  : 0 .. N-1) {
+				if	// wait until node nn finishes
+				:: node[nn].round[rnd].btkt[2] != 0 -> skip
+				fi
+				assert(node[nn].round[rnd].best[2] == best);
+			}
 		fi
 	}
 }
