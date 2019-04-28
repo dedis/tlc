@@ -26,10 +26,10 @@ Node node[N];			// all state of each node
 
 
 proctype NodeProc(byte n) {
-	byte rnd, tkt, step, seen, scnt, prsn, best, btkt, nn;
-	bool correct = (n < T);
+	byte rnd, tkt, step, seen, scnt, prsn, best, btkt, nn, bseen;
+	//bool correct = (n < T);
 
-	printf("Node %d correct %d\n", n, correct);
+	//printf("Node %d correct %d\n", n, correct);
 
 	for (rnd : 0 .. ROUNDS-1) {
 
@@ -64,20 +64,21 @@ proctype NodeProc(byte n) {
 					scnt++;
 
 					// Track the best proposal we've seen
-					prsn = prsn | (1 << nn);
 					if
-					:: node[nn].round[rnd].ticket < btkt ->
-						best = nn;
-						btkt = node[nn].round[rnd].ticket;
-					:: node[nn].round[rnd].ticket == btkt ->
-						best = 255;	// means tied
-					:: else -> skip
-					fi
+					:: step == 0 ->
+						prsn = prsn | (1 << nn);
+						if
+						:: node[nn].round[rnd].ticket < btkt ->
+							best = nn;
+							btkt = node[nn].round[rnd].ticket;
+						:: node[nn].round[rnd].ticket == btkt ->
+							best = 255;	// means tied
+						:: else -> skip
+						fi
 
 					// Track proposals we've seen indirectly
-					if
 					:: step > 0 ->
-						prsn = prsn | node[n].round[rnd].prsn[step-1];
+						prsn = prsn | node[nn].round[rnd].prsn[step-1];
 						if
 						:: node[nn].round[rnd].btkt[step-1] < btkt ->
 							best = node[nn].round[rnd].best[step-1];
@@ -108,7 +109,30 @@ proctype NodeProc(byte n) {
 			printf("%d step %d complete: seen %x best %d ticket %d\n", n, step, seen, best, btkt);
 		}
 
-		printf("%d round %d complete\n", n, rnd);
+		// How many nodes we received time t+2 messages from
+		// saw the best proposal we saw?
+		bseen = 0;
+		for (nn : 0 .. N-1) {
+			if
+			:: best < 255 &&
+			   ((node[n].round[rnd].seen[2] & (1 << nn)) != 0) &&
+			   ((node[nn].round[rnd].prsn[1] & (1 << best)) != 0) ->
+				bseen++;
+			:: else -> skip
+			fi
+		}
+		printf("%d round %d best %d bseen %d\n", n, rnd, best, bseen);
+
+		if
+		:: best == 255 ->
+			printf("%d round %d failed due to tie\n", n, rnd);
+		:: best < 255 && bseen < T ->
+			printf("%d round %d may not have committed\n", n, rnd);
+		:: else ->
+			printf("%d round %d definitely committed\n", n, rnd);
+
+			// Make sure all nodes actually agreed
+		fi
 	}
 }
 
