@@ -5,7 +5,7 @@
 #define T	(Fa+Fcu+1)	// consensus threshold required
 
 #define STEPS	3		// TLC time-steps per consensus round
-#define ROUNDS	1		// number of consensus rounds to run
+#define ROUNDS	2		// number of consensus rounds to run
 #define TICKETS	3		// proposal lottery ticket space
 
 
