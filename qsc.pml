@@ -51,6 +51,8 @@ proctype NodeProc(byte n) {
 
 	for (rnd : 0 .. ROUNDS-1) {
 
+		atomic {
+
 		// select a "random" (here just arbitrary) ticket
 		select (tkt : 1 .. TICKETS);
 		node[n].round[rnd].ticket = tkt;
@@ -61,6 +63,8 @@ proctype NodeProc(byte n) {
 		// finding the "best proposal" starts with our own...
 		best = n;
 		btkt = tkt;
+
+		} // atomic
 
 		// Run the round to completion
 		for (step : 0 .. STEPS-1) {
@@ -77,6 +81,8 @@ proctype NodeProc(byte n) {
 				if
 				:: ((seen & (1 << nn)) == 0) && 
 				    (node[nn].round[rnd].sent[step] != 0) ->
+
+					atomic {
 
 					//printf("%d received from %d\n", n, nn);
 					seen = seen | (1 << nn);
@@ -109,6 +115,8 @@ proctype NodeProc(byte n) {
 					:: else -> skip
 					fi
 
+					} // atomic
+
 				:: else -> skip
 				fi
 
@@ -119,6 +127,8 @@ proctype NodeProc(byte n) {
 				fi
 			od
 
+			atomic {
+
 			// Record what we've seen for the benefit of others
 			node[n].round[rnd].seen[step] = seen;
 			node[n].round[rnd].prsn[step] = prsn;
@@ -126,7 +136,11 @@ proctype NodeProc(byte n) {
 			node[n].round[rnd].btkt[step] = btkt;
 
 			printf("%d step %d complete: seen %x best %d ticket %d\n", n, step, seen, best, btkt);
+
+			} // atomic
 		}
+
+		atomic {
 
 		// Find the best propposal we can determine to be eligible.
 		// We deem a proposal to be eligible if we can see that
@@ -199,6 +213,8 @@ proctype NodeProc(byte n) {
 		:: (belig == 255) ->
 			printf("%d round %d failed due to tie\n", n, rnd);
 		fi
+
+		} // atomic
 	}
 }
 
