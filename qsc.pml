@@ -16,6 +16,8 @@ typedef Round {
 	byte prsn[STEPS];	// bitmaks of proposals we've seen after each
 	byte best[STEPS];
 	byte btkt[STEPS];
+	byte picked;		// which proposal this node picked this round
+	bit done;		// set to true when round complete
 }
 
 typedef Node {
@@ -25,8 +27,24 @@ typedef Node {
 Node node[N];			// all state of each node
 
 
+// Calculate n number of bits set in byte v
+inline nset(v, n) {
+	atomic {
+		int i;
+
+		n = 0;
+		for (i : 0 .. 7) {
+			if
+			:: ((v & (1 << j)) != 0) -> n++;
+			:: else -> skip;
+			fi
+		}
+	}
+}
+
 proctype NodeProc(byte n) {
-	byte rnd, tkt, step, seen, scnt, prsn, best, btkt, nn, bseen;
+	byte rnd, tkt, step, seen, scnt, prsn, best, btkt, nn;
+	byte belig, betkt, beseen, k;
 	//bool correct = (n < T);
 
 	//printf("Node %d correct %d\n", n, correct);
@@ -40,7 +58,7 @@ proctype NodeProc(byte n) {
 		// we've already seen our own proposal
 		prsn  = 1 << n;
 
-		// the "best proposal" starts with our own...
+		// finding the "best proposal" starts with our own...
 		best = n;
 		btkt = tkt;
 
@@ -57,9 +75,10 @@ proctype NodeProc(byte n) {
 			::	// Pick another node to try to 'receive' from
 				select (nn : 1 .. N); nn--;
 				if
-				:: (((seen & (1 << nn)) == 0) && 
-				    (node[nn].round[rnd].sent[step] != 0)) ->
-					printf("%d received from %d\n", n, nn);
+				:: ((seen & (1 << nn)) == 0) && 
+				    (node[nn].round[rnd].sent[step] != 0) ->
+
+					//printf("%d received from %d\n", n, nn);
 					seen = seen | (1 << nn);
 					scnt++;
 
@@ -109,36 +128,76 @@ proctype NodeProc(byte n) {
 			printf("%d step %d complete: seen %x best %d ticket %d\n", n, step, seen, best, btkt);
 		}
 
-		// How many nodes we received time t+2 messages from
-		// saw the best proposal we saw?
-		bseen = 0;
+		// Find the best propposal we can determine to be eligible.
+		// We deem a proposal to be eligible if we can see that
+		// it was seen by at least f+1 nodes by time t+1.
+		// This ensures that ALL nodes at least know of its existence
+		// (though not necessarily its eligibility) by t+2.
+		belig = 255;	// start with a fake 'tie' state
+		betkt = 255;	// worst possible ticket value
+		beseen = 0;
 		for (nn : 0 .. N-1) {
+
+			// determine number of nodes that knew of nn's proposal
+			// by time t+2.
+			int nnseen = 0;
+			for (k : 0 .. N-1) {
+				if
+				:: ((node[n].round[rnd].seen[2] & (1 << k)) != 0) && ((node[k].round[rnd].prsn[1] & (1 << nn)) != 0) -> nnseen++;
+				:: else -> skip
+				fi
+			}
+			//printf("%d from %d nnseen %d\n", n, nn, nnseen);
+
 			if
-			:: best < 255 &&
-			   ((node[n].round[rnd].seen[2] & (1 << nn)) != 0) &&
-			   ((node[nn].round[rnd].prsn[1] & (1 << best)) != 0) ->
-				bseen++;
+			:: (nnseen >= Fa+1) &&	// nn's proposal is eligible
+			   (node[nn].round[rnd].ticket < betkt) -> // is better
+				belig = nn;
+				betkt = node[nn].round[rnd].ticket;
+				beseen = nnseen;
+				//printf("%d new belig %d ticket %d seen %d\n", n, belig, betkt, beseen);
+			:: (nnseen >= Fa+1) &&	// nn's proposal is eligible
+			   (node[nn].round[rnd].ticket == betkt) -> // is tied
+				belig = 255;
+				beseen = 0;
 			:: else -> skip
 			fi
 		}
-		printf("%d round %d best %d bseen %d\n", n, rnd, best, bseen);
+		printf("%d best eligible proposal %d ticket %d seen by %d\n", n, belig, betkt, beseen);
 
+		// we should have found at least one eligible proposal!
+		assert(betkt < 255);
+
+		// The round is now complete in terms of picking a proposal.
+		node[n].round[rnd].picked = belig;
+		node[n].round[rnd].done = 1;
+
+		// Can we determine a proposal to be definitely committed?
+		// To do so, we must be able to see that:
+		//
+		// 1. it was seen by t+2 by ALL nodes we have info from.
+		// 2. we know of no other proposal competitive with it.
+		// 
+		// #1 ensures ALL nodes will judge this proposal as eligible;
+		// #2 ensures no node could judge another proposal as eligible.
 		if
-		:: best == 255 ->
-			printf("%d round %d failed due to tie\n", n, rnd);
-		:: best < 255 && bseen < T ->
-			printf("%d round %d may not have committed\n", n, rnd);
-		:: else ->
+		:: (belig < 255) && (beseen >= T) && (belig == best) ->
 			printf("%d round %d definitely committed\n", n, rnd);
 
-			// Make sure all nodes actually agreed
-			// XXX doesn't properly implement eligibility
-			for (nn  : 0 .. N-1) {
-				if	// wait until node nn finishes
-				:: node[nn].round[rnd].btkt[2] != 0 -> skip
-				fi
-				assert(node[nn].round[rnd].best[2] == best);
-			}
+			// Verify that what we decided doesn't conflict with
+			// the proposal any other node chooses.
+			select (nn : 1 .. N); nn--;
+			assert(!node[nn].round[rnd].done ||
+				(node[nn].round[rnd].picked == belig));
+
+		:: (belig < 255) && (beseen < T) ->
+			printf("%d round %d failed due to threshold\n", n, rnd);
+
+		:: (belig < 255) && (belig != best) ->
+			printf("%d round %d failed due to spoiler\n", n, rnd);
+
+		:: (belig == 255) ->
+			printf("%d round %d failed due to tie\n", n, rnd);
 		fi
 	}
 }
