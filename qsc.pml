@@ -6,7 +6,7 @@
 
 #define STEPS	3		// TLC time-steps per consensus round
 #define ROUNDS	1		// number of consensus rounds to run
-#define TICKETS	10		// proposal lottery ticket space
+#define TICKETS	3		// proposal lottery ticket space
 
 
 typedef Round {
@@ -112,7 +112,6 @@ proctype NodeProc(byte n) {
 							best = 255;	// tied
 						:: else -> skip
 						fi
-					:: else -> skip
 					fi
 
 					} // atomic
