@@ -3,11 +3,12 @@ imports Main
 begin
 
 
+
 type adversary = history -> action
 
 
 datatype pkt =		(* packet broadcast by some node *)
-    tMsg nat		(* application message sent at time t *)
+    tMsg nat nat	(* message sent by node i at at time t *)
   | tAck nat nat	(* acknowledgment at time t of message at ts<t *)
 
 datatype step =
