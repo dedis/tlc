@@ -1,4 +1,4 @@
-package tlc
+package model
 
 import (
 	"testing"
@@ -79,7 +79,13 @@ func (tn *qscTestNode) initStep(step int) {
 }
 
 
-func qscTestRun(t *testing.T, n, f, nrounds int) {
+func qscTestRun(t *testing.T, t, n,maxRounds, maxSleep int) {
+
+	MaxRounds = maxRounds
+	MaxSleep = maxSleep
+	Run(t, n)
+
+
 
 	t := n - f
 	nsteps := nrounds * RoundSteps
