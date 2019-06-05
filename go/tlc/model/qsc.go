@@ -26,7 +26,6 @@ func (n *Node) advanceQSC(saw, wit set) {
 			bestTicket = p.ticket
 		}
 	}
-	println(n.tmpl.sender, n.tmpl.step, "best", bestProp.sender, "ticket", bestTicket)
 
 	// Determine if we can consider this proposal permanently committed.
 	spoiled := n.spoiledQSC(s, saw, bestProp, bestTicket)
@@ -34,20 +33,27 @@ func (n *Node) advanceQSC(saw, wit set) {
 	committed := !spoiled && reconfirmed
 
 	// Record the consensus results for this round (from s to s+3).
+	n.mutex.Lock()
 	n.choice = append(n.choice, bestProp)
 	n.commit = append(n.commit, committed)
-	println(n.tmpl.sender, n.tmpl.step, "choice", bestProp.sender, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
+	if committed {
+		n.commits++
+	}
+	n.mutex.Unlock()
+	//println(n.tmpl.sender, n.tmpl.step, "choice", bestProp.sender, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
 
-	// (Racy) global sanity-check our results against other nodes' choices
+	// Globally sanity-check our results against other nodes' choices
 	if committed {
 		for _, nn := range All {
+			nn.mutex.Lock()
 			if len(nn.choice) > s && nn.choice[s] != bestProp {
 				panic("consensus safety violation!")
 			}
+			nn.mutex.Unlock()
 		}
 	}
 
-	// Don't bother saving history before the start of the new round.
+	// Don't bother saving history before the start of the next round.
 	n.save = s+1
 }
 

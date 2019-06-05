@@ -18,7 +18,7 @@ func (n *Node) copyTemplate() *Message {
 func (n *Node) broadcastTLC() *Message {
 
 	msg := n.copyTemplate()
-	println(n.tmpl.sender, n.tmpl.step, "broadcast", msg, "typ", msg.typ)
+	//println(n.tmpl.sender, n.tmpl.step, "broadcast", msg, "typ", msg.typ)
 	for _, dest := range All {
 		dest.comm <- msg
 	}
@@ -69,7 +69,7 @@ func (n *Node) receiveTLC(msg *Message) {
 	if msg.step > n.tmpl.step { panic("failed to catch up to msg!") }
 
 	// Now process this message according to type.
-	println(n.tmpl.sender, n.tmpl.step, "received", msg, "step", msg.step, "typ", msg.typ)
+	//println(n.tmpl.sender, n.tmpl.step, "received", msg, "step", msg.step, "typ", msg.typ)
 	switch msg.typ {
 	case Prop: // A raw unwitnessed proposal broadcast.
 		if msg.step == n.tmpl.step { // Acknowledge only in same step.
@@ -79,7 +79,6 @@ func (n *Node) receiveTLC(msg *Message) {
 	case Ack: // An acknowledgment. Collect a threshold of acknowledgments.
 		if msg.prop == n.tmpl.prop { // only if it acks our proposal
 			n.acks.add(msg)
-			println(n.tmpl.sender, n.tmpl.step, "nacks", len(n.acks))
 			if n.tmpl.typ == Prop && len(n.acks) >= Threshold {
 
 				// Broadcast a threshold-witnesed certification

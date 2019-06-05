@@ -2,11 +2,12 @@ package model
 
 import (
 	"time"
+	"sync"
 )
 
 
 var Threshold int		// TLC and consensus threshold
-var All []Node			// List of all nodes
+var All []*Node			// List of all nodes
 
 var MaxSteps int
 var MaxSleep time.Duration
@@ -41,16 +42,18 @@ type Node struct {
 	// This node's record of QSC consensus history
 	choice	[]*Message	// Best proposal this node chose each round
 	commit	[]bool		// Whether we observed successful commitment
+	commits	int		// Total number of rounds we observed success
+	mutex	sync.Mutex	// Mutex protecting access to the above state
 
 	done	chan struct{}	// Run signals this when a node terminates
 }
 
-func (n *Node) Init(self int) {
-
-	// Size the channels for one message of each type from each node
-	n.comm = make(chan *Message, 5 * len(All))
+func NewNode(self int) (n *Node) {
+	n = &Node{}
+	n.comm = make(chan *Message, 3 * len(All) * MaxSteps)
 	n.tmpl = Message{sender: self, step: 0}
 	n.done = make(chan struct{})
+	return
 }
 
 func (n *Node) Run(self int) {
@@ -70,9 +73,9 @@ func Run(threshold, nnodes int) {
 
 	// Initialize the nodes
 	Threshold = threshold
-	All = make([]Node, nnodes)
+	All = make([]*Node, nnodes)
 	for i := range All {
-		All[i].Init(i)
+		All[i] = NewNode(i)
 	}
 
 	// Run all the nodes asynchronously on separate goroutines
