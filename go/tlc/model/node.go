@@ -15,40 +15,31 @@ var MaxTicket int32 = 100	// Amount of entropy in lottery tickets
 
 type Type int			// Tyope of message
 const (
-	Raw Type = iota		// Raw unwitnessed message
-	Ack			// Acknowledgment of a Raw message
-	Wit			// Threshold-witnessed message
+	Prop Type = iota	// Raw unwitnessed proposal
+	Ack			// Acknowledgment of a proposal
+	Wit			// Threshold witness confirmation of proposal
 )
 
 type Message struct {
 	sender	int		// Which node sent this message
-
-	// Threshold Logical Clocks (TLC) message state
 	step	int		// Logical time step this message is for
 	typ	Type		// Message type
+	prop	*Message	// Proposal this Ack or Wit is about
 	ticket	int32		// Genetic fitness ticket for this proposal
-	saw	set		// Messages sender already saw in this step
-	wit	set		// Threshold witnessed messages seen this step
-	lastsaw	set		// Messages sender saw in last time step
-	lastwit	set		// Threshold witnessed messages seen last step
-
-	// Que Sera Consensus (QSC) message state
-	pred	*Message	// Chosen predecessor of this proposal
-	commit	bool		// True if proposal is permanently committed
+	saw	set		// Recent messages the sender already saw
+	wit	set		// Threshold witnessed messages the sender saw
 }
 
 
 type Node struct {
 	comm	chan *Message	// Channel to send messages to this node
 	tmpl	Message		// Template for messages we send
+	save	int		// Earliest step for which we maintain history
 	acks	set		// Acknowledgments we've received in this step
-
-	// This node's record of TLC history
-	saw	[]set		// all broadcast messages seen in prior steps
-	wit	[]set		// threshold witnessed messages in prior steps
+	wits	set		// Threshold witnessed messages seen this step
 
 	// This node's record of QSC consensus history
-	choice	[]int		// Which node's message was chosen each round
+	choice	[]*Message	// Best proposal this node chose each round
 	commit	[]bool		// Whether we observed successful commitment
 
 	done	chan struct{}	// Run signals this when a node terminates
@@ -63,7 +54,7 @@ func (n *Node) Init(self int) {
 }
 
 func (n *Node) Run(self int) {
-	n.advanceTLC(0, nil, nil) // broadcast message for initial time step
+	n.advanceTLC(0) // broadcast message for initial time step
 	for MaxSteps == 0 || n.tmpl.step < MaxSteps {
 		msg := <-n.comm		// Receive a message
 		n.receiveTLC(msg)	// Process it
@@ -74,6 +65,8 @@ func (n *Node) Run(self int) {
 
 // Initialize and run the model for a given threshold and number of nodes.
 func Run(threshold, nnodes int) {
+
+	println("Run config", threshold, "of", nnodes)
 
 	// Initialize the nodes
 	Threshold = threshold

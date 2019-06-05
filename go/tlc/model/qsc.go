@@ -5,11 +5,9 @@ package model
 const RoundSteps = 3
 
 
-// The TLC layer upcalls this method on advancing to a new time-step.
-// The step parameter will always be monotonically increasing over time.
-// We must fill in the QSC layer part of the message template
-// for the new message this node broadcasts for this time step.
-func (n *Node) advanceQSC() {
+// The TLC layer upcalls this method on advancing to a new time-step,
+// with sets of proposals seen (saw) and threshold witnessed (wit) recently.
+func (n *Node) advanceQSC(saw, wit set) {
 
 	// Calculate the starting step of the round that's just now completing.
 	s := n.tmpl.step - RoundSteps
@@ -21,62 +19,53 @@ func (n *Node) advanceQSC() {
 	// and that is in our view by the end of the round at s+3.
 	var bestProp *Message
 	var bestTicket int32
-	for m2 := range n.saw[s+2] { // step s+2 messages we saw by s+3
-		if m2.step != s+2 { panic("wrong time step")  }
-		for m1 := range m2.lastsaw { // s+1 messages we saw by s+2
-			if m1.step != s+1 { panic("wrong time step")  }
-			for m0 := range m1.lastwit { // s+0 witnessed msgs
-				if m0.step != s { panic("wrong time step")  }
-				if m0.ticket >= bestTicket {
-					bestProp = m0
-					bestTicket = m0.ticket
-				}
-			}
+	for p := range wit {
+		if p.typ != Prop { panic("wit should contain only proposals") }
+		if p.step == s+0 && p.ticket >= bestTicket {
+			bestProp = p
+			bestTicket = p.ticket
 		}
 	}
-	println(s, "best", bestProp.sender, "ticket", bestTicket)
+	println(n.tmpl.sender, n.tmpl.step, "best", bestProp.sender, "ticket", bestTicket)
 
 	// Determine if we can consider this proposal permanently committed.
-	spoiled := n.spoiledQSC(s, bestProp, bestTicket)
-	reconfirmed := n.reconfirmedQSC(s, bestProp)
+	spoiled := n.spoiledQSC(s, saw, bestProp, bestTicket)
+	reconfirmed := n.reconfirmedQSC(s, wit, bestProp)
 	committed := !spoiled && reconfirmed
 
 	// Record the consensus results for this round (from s to s+3).
-	n.choice = append(n.choice, bestProp.sender)
+	n.choice = append(n.choice, bestProp)
 	n.commit = append(n.commit, committed)
-	println(s, "choice", bestProp.sender, "spoiled", spoiled,
-			"reconfirmed", reconfirmed, "committed", committed)
+	println(n.tmpl.sender, n.tmpl.step, "choice", bestProp.sender, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
 
 	// (Racy) global sanity-check our results against other nodes' choices
 	if committed {
 		for _, nn := range All {
-			if len(nn.choice) > s && nn.choice[s] != bestProp.sender{
+			if len(nn.choice) > s && nn.choice[s] != bestProp {
 				panic("consensus safety violation!")
 			}
 		}
 	}
+
+	// Don't bother saving history before the start of the new round.
+	n.save = s+1
 }
 
-// Return true if there's another proposal competitive with a candidate
-// that we could have learned about by step s+2.
-func (n *Node) spoiledQSC(s int, proposal *Message, ticket int32) bool {
-	for m1 := range n.saw[s+1] {
-		if m1.step != s+1 { panic("wrong time step") }
-		for m0 := range m1.lastsaw {
-			if m0.step != s { panic("wrong time step") }
-			if m0 != proposal && m0.ticket >= ticket {
-				return true	// proposal has competition!
-			}
+// Return true if there's another proposal competitive with a given candidate.
+func (n *Node) spoiledQSC(s int, saw set, prop *Message, ticket int32) bool {
+	for p := range saw {
+		if p.step == s+0 && p.typ == Prop && p != prop &&
+				p.ticket >= ticket {
+			return true	// victory spoiled by competition!
 		}
 	}
 	return false
 }
 
-// Return true if given proposal was doubly confirmed (reconfirmed) by s+2.
-func (n *Node) reconfirmedQSC(s int, prop *Message) bool {
-	for m1 := range n.wit[s+1] {
-		if m1.step != s+1 { panic("wrong time step") }
-		if m1.lastwit.has(prop) {
+// Return true if given proposal was doubly confirmed (reconfirmed).
+func (n *Node) reconfirmedQSC(s int, wit set, prop *Message) bool {
+	for p := range wit {	// search for a paparazzi witness at s+1
+		if p.step == s+1 && p.wit.has(prop) {
 			return true
 		}
 	}

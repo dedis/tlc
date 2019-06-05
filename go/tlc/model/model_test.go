@@ -21,6 +21,8 @@ func TestQSC(t *testing.T) {
 	// Trivial case: 1 of 1 consensus!
 	testRun(t, 1, 1, 100, 0)
 
+	for i := 1; i < 100; i++ {
 	testRun(t, 2, 3, 100, 0)
+	}
 }
 
