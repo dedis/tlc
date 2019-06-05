@@ -33,25 +33,9 @@ func (n *Node) advanceQSC(saw, wit set) {
 	committed := !spoiled && reconfirmed
 
 	// Record the consensus results for this round (from s to s+3).
-	n.mutex.Lock()
 	n.choice = append(n.choice, bestProp)
 	n.commit = append(n.commit, committed)
-	if committed {
-		n.commits++
-	}
-	n.mutex.Unlock()
 	//println(n.tmpl.sender, n.tmpl.step, "choice", bestProp.sender, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
-
-	// Globally sanity-check our results against other nodes' choices
-	if committed {
-		for _, nn := range All {
-			nn.mutex.Lock()
-			if len(nn.choice) > s && nn.choice[s] != bestProp {
-				panic("consensus safety violation!")
-			}
-			nn.mutex.Unlock()
-		}
-	}
 
 	// Don't bother saving history before the start of the next round.
 	n.save = s+1

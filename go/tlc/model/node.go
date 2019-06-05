@@ -2,7 +2,6 @@ package model
 
 import (
 	"time"
-	"sync"
 )
 
 
@@ -42,8 +41,6 @@ type Node struct {
 	// This node's record of QSC consensus history
 	choice	[]*Message	// Best proposal this node chose each round
 	commit	[]bool		// Whether we observed successful commitment
-	commits	int		// Total number of rounds we observed success
-	mutex	sync.Mutex	// Mutex protecting access to the above state
 
 	done	chan struct{}	// Run signals this when a node terminates
 }
@@ -79,13 +76,31 @@ func Run(threshold, nnodes int) {
 	}
 
 	// Run all the nodes asynchronously on separate goroutines
-	for i := range All {
-		go All[i].Run(i)
+	for i, n := range All {
+		go n.Run(i)
 	}
 
 	// Wait for all the nodes to complete their execution
-	for i := range All {
-		<-All[i].done
+	for _, n := range All {
+		<-n.done
+	}
+
+	// Globally sanity-check and summarize each node's observed results
+	for i, n := range All {
+		commits := 0
+		for s, committed := range n.commit {
+			if committed {
+				commits++
+				for _, nn := range All {
+					if nn.choice[s] != n.choice[s] {
+						panic("safety violation!")
+					}
+				}
+			}
+		}
+		println(i, "committed", commits, "of", len(n.commit),
+				"success rate", (commits*100)/len(n.commit),
+				"percent")
 	}
 }
 
