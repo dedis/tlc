@@ -2,6 +2,7 @@ package model
 
 import (
 	"time"
+	"math/rand"
 )
 
 
@@ -58,6 +59,7 @@ func (n *Node) Run(self int) {
 	for MaxSteps == 0 || n.tmpl.step < MaxSteps {
 		msg := <-n.comm		// Receive a message
 		n.receiveTLC(msg)	// Process it
+		time.Sleep(time.Duration(rand.Int63n(int64(MaxSleep+1))))
 	}
 	n.done <- struct{}{}	// signal that we're done
 }
@@ -66,7 +68,7 @@ func (n *Node) Run(self int) {
 // Initialize and run the model for a given threshold and number of nodes.
 func Run(threshold, nnodes int) {
 
-	println("Run config", threshold, "of", nnodes)
+	//println("Run config", threshold, "of", nnodes)
 
 	// Initialize the nodes
 	Threshold = threshold
@@ -83,24 +85,6 @@ func Run(threshold, nnodes int) {
 	// Wait for all the nodes to complete their execution
 	for _, n := range All {
 		<-n.done
-	}
-
-	// Globally sanity-check and summarize each node's observed results
-	for i, n := range All {
-		commits := 0
-		for s, committed := range n.commit {
-			if committed {
-				commits++
-				for _, nn := range All {
-					if nn.choice[s] != n.choice[s] {
-						panic("safety violation!")
-					}
-				}
-			}
-		}
-		println(i, "committed", commits, "of", len(n.commit),
-				"success rate", (commits*100)/len(n.commit),
-				"percent")
 	}
 }
 
