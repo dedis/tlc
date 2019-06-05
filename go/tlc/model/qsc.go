@@ -34,15 +34,18 @@ func (n *Node) advanceQSC() {
 			}
 		}
 	}
+	println(s, "best", bestProp.sender, "ticket", bestTicket)
 
 	// Determine if we can consider this proposal permanently committed.
-	committed :=
-		!n.spoiledQSC(s, bestProp, bestTicket) &&
-		n.reconfirmedQSC(s, bestProp)
+	spoiled := n.spoiledQSC(s, bestProp, bestTicket)
+	reconfirmed := n.reconfirmedQSC(s, bestProp)
+	committed := !spoiled && reconfirmed
 
 	// Record the consensus results for this round (from s to s+3).
 	n.choice = append(n.choice, bestProp.sender)
 	n.commit = append(n.commit, committed)
+	println(s, "choice", bestProp.sender, "spoiled", spoiled,
+			"reconfirmed", reconfirmed, "committed", committed)
 
 	// (Racy) global sanity-check our results against other nodes' choices
 	if committed {

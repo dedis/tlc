@@ -56,7 +56,8 @@ type Node struct {
 
 func (n *Node) Init(self int) {
 
-	n.comm = make(chan *Message)
+	// Size the channels for one message of each type from each node
+	n.comm = make(chan *Message, 5 * len(All))
 	n.tmpl = Message{sender: self, step: 0}
 	n.done = make(chan struct{})
 }
@@ -64,8 +65,8 @@ func (n *Node) Init(self int) {
 func (n *Node) Run(self int) {
 	n.advanceTLC(0, nil, nil) // broadcast message for initial time step
 	for MaxSteps == 0 || n.tmpl.step < MaxSteps {
-		r := <-n.comm		// Receive a message
-		n.receiveTLC(r)		// Process it
+		msg := <-n.comm		// Receive a message
+		n.receiveTLC(msg)	// Process it
 	}
 	n.done <- struct{}{}	// signal that we're done
 }
