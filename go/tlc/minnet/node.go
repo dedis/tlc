@@ -1,8 +1,8 @@
-package model
+package minnet
 
 import (
 	"time"
-	"math/rand"
+	"sync"
 )
 
 
@@ -19,25 +19,54 @@ const (
 	Prop Type = iota	// Raw unwitnessed proposal
 	Ack			// Acknowledgment of a proposal
 	Wit			// Threshold witness confirmation of proposal
+	Done			// Internal message indicating time to quit
 )
+
+// Vector timestemp
+type vec []int
+
+// Set z to the elementwise maximum of vectors x and y.
+// Inputs x and/or y can be the same as target z.
+func (z vec) max(x, y vec) {
+	for i := range z {
+		if x[i] > y[i] {
+			z[i] = x[i]
+		} else {
+			z[i] = y[i]
+		}
+	}
+}
+
+
+type msgId struct {
+	sender	int		// Sending node number
+	seq	int		// Message index in sender's log
+}
 
 type Message struct {
 	sender	int		// Which node sent this message
+	seq	int		// Node-local sequence number for vector time
 	step	int		// Logical time step this message is for
 	typ	Type		// Message type
+	vec	[]int		// Vector clock update from sender node
 	prop	*Message	// Proposal this Ack or Wit is about
 	ticket	int32		// Genetic fitness ticket for this proposal
 	saw	set		// Recent messages the sender already saw
 	wit	set		// Threshold witnessed messages the sender saw
 }
 
-
 type Node struct {
-	comm	chan *Message	// Channel to send messages to this node
+	comm	[]chan *Message	// Channels to send messages to this node
+	recv	chan *Message	// Node-internal message receive channel
+
 	tmpl	Message		// Template for messages we send
 	save	int		// Earliest step for which we maintain history
 	acks	set		// Acknowledgments we've received in this step
 	wits	set		// Threshold witnessed messages seen this step
+
+	mutex	sync.Mutex	// Mutex protecting multithreaded gossip state
+	mat	[]vec		// Node's current matrix clock
+	log	[][]*Message	// Record of all nodes' message histories
 
 	// This node's record of QSC consensus history
 	choice	[]*Message	// Best proposal this node chose each round
@@ -48,22 +77,13 @@ type Node struct {
 
 func NewNode(self int) (n *Node) {
 	n = &Node{}
-	n.comm = make(chan *Message, 3 * len(All) * MaxSteps)
+	n.initGossip(self)
+
 	n.tmpl = Message{sender: self, step: 0}
+
 	n.done = make(chan struct{})
 	return
 }
-
-func (n *Node) Run(self int) {
-	n.advanceTLC(0) // broadcast message for initial time step
-	for MaxSteps == 0 || n.tmpl.step < MaxSteps {
-		msg := <-n.comm		// Receive a message
-		n.receiveTLC(msg)	// Process it
-		time.Sleep(time.Duration(rand.Int63n(int64(MaxSleep+1))))
-	}
-	n.done <- struct{}{}	// signal that we're done
-}
-
 
 // Initialize and run the model for a given threshold and number of nodes.
 func Run(threshold, nnodes int) {
@@ -79,7 +99,7 @@ func Run(threshold, nnodes int) {
 
 	// Run all the nodes asynchronously on separate goroutines
 	for i, n := range All {
-		go n.Run(i)
+		go n.runGossip(i)
 	}
 
 	// Wait for all the nodes to complete their execution
