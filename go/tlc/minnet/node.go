@@ -22,33 +22,17 @@ const (
 	Done			// Internal message indicating time to quit
 )
 
-// Vector timestemp
-type vec []int
-
-// Set z to the elementwise maximum of vectors x and y.
-// Inputs x and/or y can be the same as target z.
-func (z vec) max(x, y vec) {
-	for i := range z {
-		if x[i] > y[i] {
-			z[i] = x[i]
-		} else {
-			z[i] = y[i]
-		}
-	}
-}
-
-
 type msgId struct {
 	from	int		// Sending node number
 	seq	int		// Message index in sender's log
 }
 
 type Message struct {
-	from	int		// Which node sent this message
+	from	int		// Which node originally sent this message
 	seq	int		// Node-local sequence number for vector time
 	step	int		// Logical time step this message is for
 	typ	Type		// Message type
-	vec	[]int		// Vector clock update from sender node
+	vec	vec		// Vector clock update from sender node
 	prop	*Message	// Proposal this Ack or Wit is about
 	ticket	int32		// Genetic fitness ticket for this proposal
 	saw	set		// Recent messages the sender already saw
@@ -56,17 +40,19 @@ type Message struct {
 }
 
 type Node struct {
+	self	int		// This node's participant number
 	comm	[]chan *Message	// Channels to send messages to this node
 	recv	chan *Message	// Node-internal message receive channel
+	mutex	sync.Mutex	// Mutex protecting node's protocol stack
 
 	tmpl	Message		// Template for messages we send
 	save	int		// Earliest step for which we maintain history
 	acks	set		// Acknowledgments we've received in this step
 	wits	set		// Threshold witnessed messages seen this step
 
-	mutex	sync.Mutex	// Mutex protecting multithreaded gossip state
 	mat	[]vec		// Node's current matrix clock
 	log	[][]*Message	// Record of all nodes' message histories
+	oom	[][]*Message	// Out-of-order messages not yet delivered
 
 	// This node's record of QSC consensus history
 	choice	[]*Message	// Best proposal this node chose each round
