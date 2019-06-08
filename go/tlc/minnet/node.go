@@ -39,12 +39,12 @@ func (z vec) max(x, y vec) {
 
 
 type msgId struct {
-	sender	int		// Sending node number
+	from	int		// Sending node number
 	seq	int		// Message index in sender's log
 }
 
 type Message struct {
-	sender	int		// Which node sent this message
+	from	int		// Which node sent this message
 	seq	int		// Node-local sequence number for vector time
 	step	int		// Logical time step this message is for
 	typ	Type		// Message type
@@ -79,7 +79,7 @@ func NewNode(self int) (n *Node) {
 	n = &Node{}
 	n.initGossip(self)
 
-	n.tmpl = Message{sender: self, step: 0}
+	n.tmpl = Message{from: self, step: 0}
 
 	n.done = make(chan struct{})
 	return

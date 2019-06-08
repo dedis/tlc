@@ -22,7 +22,7 @@ const (
 )
 
 type Message struct {
-	sender	int		// Which node sent this message
+	from	int		// Which node sent this message
 	step	int		// Logical time step this message is for
 	typ	Type		// Message type
 	prop	*Message	// Proposal this Ack or Wit is about
@@ -49,7 +49,7 @@ type Node struct {
 func NewNode(self int) (n *Node) {
 	n = &Node{}
 	n.comm = make(chan *Message, 3 * len(All) * MaxSteps)
-	n.tmpl = Message{sender: self, step: 0}
+	n.tmpl = Message{from: self, step: 0}
 	n.done = make(chan struct{})
 	return
 }

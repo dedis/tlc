@@ -18,7 +18,7 @@ func (n *Node) copyTemplate() *Message {
 func (n *Node) broadcastTLC() *Message {
 
 	msg := n.copyTemplate()
-	//println(n.tmpl.sender, n.tmpl.step, "broadcast", msg, "typ", msg.typ)
+	//println(n.tmpl.from, n.tmpl.step, "broadcast", msg, "typ", msg.typ)
 	n.broadcastGossip(msg)
 	return msg
 }
@@ -29,7 +29,7 @@ func (n *Node) acknowledgeTLC(prop *Message) {
 	msg := n.copyTemplate()
 	msg.typ = Ack
 	msg.prop = prop
-	All[prop.sender].comm[n.tmpl.sender] <- msg
+	All[prop.from].comm[n.tmpl.from] <- msg
 }
 
 // Advance to a new time step.
@@ -67,7 +67,7 @@ func (n *Node) receiveTLC(msg *Message) {
 	if msg.step > n.tmpl.step { panic("failed to catch up to msg!") }
 
 	// Now process this message according to type.
-	//println(n.tmpl.sender, n.tmpl.step, "received", msg, "step", msg.step, "typ", msg.typ)
+	//println(n.tmpl.from, n.tmpl.step, "received", msg, "step", msg.step, "typ", msg.typ)
 	switch msg.typ {
 	case Prop: // A raw unwitnessed proposal broadcast.
 		if msg.step == n.tmpl.step { // Acknowledge only in same step.

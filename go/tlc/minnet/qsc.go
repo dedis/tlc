@@ -35,7 +35,7 @@ func (n *Node) advanceQSC(saw, wit set) {
 	// Record the consensus results for this round (from s to s+3).
 	n.choice = append(n.choice, bestProp)
 	n.commit = append(n.commit, committed)
-	//println(n.tmpl.sender, n.tmpl.step, "choice", bestProp.sender, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
+	//println(n.tmpl.from, n.tmpl.step, "choice", bestProp.from, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
 
 	// Don't bother saving history before the start of the next round.
 	n.save = s+1
