@@ -8,8 +8,8 @@ const RoundSteps = 3
 // The TLC layer upcalls this method on advancing to a new time-step,
 // with sets of proposals seen (saw) and threshold witnessed (wit) recently.
 func (n *Node) advanceQSC(saw, wit set) {
-	println(n.self, n.tmpl.Step, "advanceQSC saw", len(saw),
-		"wit", len(wit))
+	//println(n.self, n.tmpl.Step, "advanceQSC saw", len(saw),
+	//	"wit", len(wit))
 
 	// Calculate the starting step of the round that's just now completing.
 	s := n.tmpl.Step - RoundSteps

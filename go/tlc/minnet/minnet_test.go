@@ -37,8 +37,8 @@ func testResults(t *testing.T) {
 			if committed {
 				commits++
 				for _, nn := range All {
-					if nn.choice[s] != n.choice[s] {
-						t.Errorf("safety violation!" +
+					if nn.choice[s].From != n.choice[s].From {
+						t.Fatalf("safety violation!" +
 							"step %v", s)
 					}
 				}
