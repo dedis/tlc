@@ -8,6 +8,8 @@ const RoundSteps = 3
 // The TLC layer upcalls this method on advancing to a new time-step,
 // with sets of proposals seen (saw) and threshold witnessed (wit) recently.
 func (n *Node) advanceQSC(saw, wit set) {
+	println(n.self, n.tmpl.Step, "advanceQSC saw", len(saw),
+		"wit", len(wit))
 
 	// Calculate the starting step of the round that's just now completing.
 	s := n.tmpl.Step - RoundSteps
@@ -35,7 +37,7 @@ func (n *Node) advanceQSC(saw, wit set) {
 	// Record the consensus results for this round (from s to s+3).
 	n.choice = append(n.choice, bestProp)
 	n.commit = append(n.commit, committed)
-	//println(n.self, n.tmpl.Step, "choice", bestProp.from, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
+	//println(n.self, n.tmpl.Step, "choice", bestProp.From, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
 
 	// Don't bother saving history before the start of the next round.
 	n.save = s+1

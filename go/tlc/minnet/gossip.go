@@ -35,24 +35,30 @@ func (n *Node) broadcastGossip(msg *Message) {
 func (n *Node) logGossip(peer int, msg *Message) *logEntry {
 
 	// Update peer's matrix clock and our record of what it saw by msg
-	//n.saw[peer].add(msg)	// msg has now been seen by peer
 	for i := range All {
 		for n.mat[peer][i] < msg.Vec[i] {
-			saw := n.log[i][n.mat[peer][i]].msg
-			n.saw[peer].add(saw)
-			if saw.Typ == Wit {
-				prop := n.log[saw.From][saw.Prop].msg
-				if prop.Typ != Prop { panic("not a proposal!") }
-				n.wit[peer].add(prop)
-			}
+			n.sawGossip(peer, n.log[i][n.mat[peer][i]].msg)
 			n.mat[peer][i]++
 		}
 	}
+	n.sawGossip(peer, msg)	// msg has been seen by the peer that sent it
+	n.sawGossip(n.self, msg) // and now we've seen the message too
 
 	ent := logEntry{msg, n.saw[peer].copy(0), n.wit[peer].copy(0)}
 	n.log[peer] = append(n.log[peer], &ent)	// record log entry
 	n.mat[n.self][peer] = len(n.log[peer])	// update our vector time
 	return &ent
+}
+
+// Record the fact that a given peer is now known to have seen a given message.
+// For Wit messages, record the fact that the proposal was threshold witnessed.
+func (n *Node) sawGossip(peer int, msg *Message) {
+	n.saw[peer].add(msg)
+	if msg.Typ == Wit {
+		prop := n.log[msg.From][msg.Prop].msg
+		if prop.Typ != Prop { panic("not a proposal!") }
+		n.wit[peer].add(prop)
+	}
 }
 
 // Transmit a message to a particular node.
@@ -160,14 +166,15 @@ func (n *Node) initGossip() {
 	n.recv = make(chan *Message, 3 *  len(All) * MaxSteps)
 
 	n.mat = make([]vec, len(All))
-	for i := range(n.mat) {
-		n.mat[i] = make(vec, len(All))
-	}
-
 	n.oom = make([][]*Message, len(All))
 	n.log = make([][]*logEntry, len(All))
 	n.saw = make([]set, len(All))
 	n.wit = make([]set, len(All))
+	for i := range All {
+		n.mat[i] = make(vec, len(All))
+		n.saw[i] = make(set)
+		n.wit[i] = make(set)
+	}
 }
 
 // This function implements each node's main event-loop goroutine.

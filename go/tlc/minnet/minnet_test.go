@@ -38,7 +38,8 @@ func testResults(t *testing.T) {
 				commits++
 				for _, nn := range All {
 					if nn.choice[s] != n.choice[s] {
-						panic("safety violation!")
+						t.Errorf("safety violation!" +
+							"step %v", s)
 					}
 				}
 			}

@@ -24,7 +24,8 @@ func (n *Node) acknowledgeTLC(prop *Message) {
 
 // Advance to a new time step.
 func (n *Node) advanceTLC(step int) {
-	//println(n.self, step, "advanceTLC")
+	println(n.self, step, "advanceTLC",
+		"saw", len(n.saw[n.self]), "wit", len(n.wit[n.self]))
 
 	// Initialize our message template for new time step
 	n.tmpl.Step = step	// Advance to new time step
