@@ -4,109 +4,177 @@ package minnet
 import (
 	"time"
 	"math/rand"
+	"io"
+//	"fmt"
 )
 
 // Broadcast a copy of our current message template to all nodes.
 func (n *Node) broadcastGossip(msg *Message) {
 
 	// Assign the new message a sequence number
-	//println(n.self, "broadcastGossip step", msg.step)
-	n.mutex.Lock()
-	msg.seq = len(n.log[n.self])		// Assign sequence number
-	msg.vec = append(vec{}, n.mat[n.self]...) // Include vector time update
-	n.log[n.self] = append(n.log[n.self], msg) // Log the message
-	n.mat[n.self][n.self] = len(n.log[n.self]) // Update our matrix clock
-	n.mutex.Unlock()
+	msg.Seq = len(n.log[n.self])		// Assign sequence number
+	msg.Vec = n.mat[n.self].copy()		// Include vector time update
+	n.logGossip(n.self, msg)		// Add msg to our log
+	//println(n.self, n.tmpl.Step, "broadcastGossip step", msg.Step,
+	//		"typ", msg.Typ, "seq", msg.Seq,
+	//		"vec", fmt.Sprintf("%v", msg.Vec))
 
 	// We always receive our own message first.
 	n.receiveTLC(msg)
 
-	for d, dn := range All {
-		if d != n.self {
-			dn.comm[n.self] <- msg
+	// Send it to all other peers.
+	for dest := range All {
+		if dest != n.self {
+			n.sendGossip(dest, msg)
 		}
+	}
+}
+
+// Log a peer's message, either our own (just sent)
+// or another node's (received and ready to be delivered).
+func (n *Node) logGossip(peer int, msg *Message) *logEntry {
+
+	// Update peer's matrix clock and our record of what it saw by msg
+	//n.saw[peer].add(msg)	// msg has now been seen by peer
+	for i := range All {
+		for n.mat[peer][i] < msg.Vec[i] {
+			saw := n.log[i][n.mat[peer][i]].msg
+			n.saw[peer].add(saw)
+			if saw.Typ == Wit {
+				prop := n.log[saw.From][saw.Prop].msg
+				if prop.Typ != Prop { panic("not a proposal!") }
+				n.wit[peer].add(prop)
+			}
+			n.mat[peer][i]++
+		}
+	}
+
+	ent := logEntry{msg, n.saw[peer].copy(0), n.wit[peer].copy(0)}
+	n.log[peer] = append(n.log[peer], &ent)	// record log entry
+	n.mat[n.self][peer] = len(n.log[peer])	// update our vector time
+	return &ent
+}
+
+// Transmit a message to a particular node.
+func (n *Node) sendGossip(dest int, msg *Message) {
+	//println(n.self, n.tmpl.Step, "sendGossip to", dest, "typ", msg.Typ,
+	//	"seq", msg.Seq,
+	//	"avail", All[dest].peer[n.self].bwr.Available())
+
+	if err := All[dest].peer[n.self].enc.Encode(msg); err != nil {
+		return	// panic("sendGossip encode: " + err.Error())
+	}
+	//println(n.self, n.tmpl.Step,
+	//	"  avail", All[dest].peer[n.self].bwr.Available())
+	if err := All[dest].peer[n.self].bwr.Flush(); err != nil {
+		return	// println("sendGossip flush: " + err.Error())
 	}
 }
 
 // Receive a message from the underlying network into the gossip layer.
 func (n *Node) receiveGossip(peer int) {
 	for  {
-		msg := <-n.comm[peer]	// Get next message from this peer
-		if msg.typ == Done {
+		// Get next message from this peer
+		msg := Message{}
+		err := n.peer[peer].dec.Decode(&msg)
+		if err == io.EOF {
 			break
+		} else if err != nil {
+			println(n.self, "receiveGossip:", err.Error())
 		}
-		//println(n.self, "receive from", msg.from, "type", msg.typ)
+		//println(n.self, n.tmpl.Step, "receiveGossip from", msg.From,
+		//	"type", msg.Typ, "seq", msg.Seq)
 
 		// Optionally insert random delays on a message basis
 		time.Sleep(time.Duration(rand.Int63n(int64(MaxSleep+1))))
 
-		n.enqueueGossip(msg)
+		n.done.Add(1)
+		go n.enqueueGossip(&msg)
 	}
+	n.done.Done()	// signal that we're done
 }
 
 // Enqueue a possibly out-of-order message for delivery,
 // and actually deliver messages as soon as we can.
-func (n *Node) enqueueGossip(msg  *Message) {
+func (n *Node) enqueueGossip(msg *Message) {
 
 	n.mutex.Lock()
-	defer func() { n.mutex.Unlock() }()
+	defer func() {
+		n.mutex.Unlock()
+		n.done.Done()
+	}()
 
 	// Unicast acknowledgments don't get sequence numbers or reordering.
-	if msg.typ == Ack {
+	if msg.Typ == Ack {
 		n.recv <- msg	// Pass to node's main goroutine
 		// XXX just dispatch to upper layers directly?
 		return
 	}
 
-	// Update our matrix clock row for the message's sender.
-	n.mat[msg.from].max(n.mat[msg.from], msg.vec)
+	// Ignore duplicate message deliveries
+	if msg.Seq < n.mat[n.self][msg.From] {
+		println(n.self, n.tmpl.Step, "duplicate message from", msg.From,
+			"seq", msg.Seq)
+		panic("XXX")
+		return
+	}
 
 	// Enqueue broadcast message for delivery in causal order.
-	for len(n.oom[msg.from]) <= (msg.seq - n.mat[n.self][msg.from]) {
-		n.oom[msg.from] = append(n.oom[msg.from], nil)
+	//println(n.self, n.tmpl.Step, "enqueueGossip from", msg.From,
+	//	"type", msg.Typ, "seq", msg.Seq,
+	//	"vec", fmt.Sprintf("%v", msg.Vec))
+	//if len(n.oom[msg.From]) <= msg.Seq - n.mat[n.self][msg.From] - 1000 {
+	//	panic("huge jump")
+	//}
+	for len(n.oom[msg.From]) <= msg.Seq - n.mat[n.self][msg.From] {
+		n.oom[msg.From] = append(n.oom[msg.From], nil)
 	}
-	n.oom[msg.from][msg.seq - n.mat[n.self][msg.from]] = msg
+	n.oom[msg.From][msg.Seq - n.mat[n.self][msg.From]] = msg
 
 	// Deliver whatever messages we can consistently with causal order.
 	for progress := true; progress; {
 		progress = false
 		for i := range All {
 			if len(n.oom[i]) > 0 && n.oom[i][0] != nil &&
-					n.oom[i][0].vec.le(n.mat[n.self]) {
-				msg = n.oom[i][0]
-				n.log[i] = append(n.log[i], msg)
-				n.mat[n.self][i] = len(n.log[i])
+					n.oom[i][0].Vec.le(n.mat[n.self]) {
+				//println(n.self, n.tmpl.Step, "enqueueGossip",
+				//	"deliver type", msg.Typ,
+				//	"seq", msg.Seq, "#oom", len(n.oom[i]))
+				if n.oom[i][0].Seq != len(n.log[i]) {
+					panic("out of sync")
+				}
+				ent := n.logGossip(i, n.oom[i][0])
+				if len(n.log[i]) != ent.msg.Seq+1 {
+					panic("out of sync")
+				}
 				n.oom[i] = n.oom[i][1:]
-				n.recv  <- msg
+				//println("  new #oom", len(n.oom[i]))
+				n.recv  <- ent.msg
 				progress = true
 			}
 		}
 	}
 }
 
-func (n *Node) initGossip(self int) {
-	n.self = self
-
+func (n *Node) initGossip() {
 	n.recv = make(chan *Message, 3 *  len(All) * MaxSteps)
-
-	n.comm = make([]chan *Message, len(All)) // A comm channel per peer
-	for i := range(All) {
-		n.comm[i] = make(chan *Message, 3 * len(All) * MaxSteps)
-	}
 
 	n.mat = make([]vec, len(All))
 	for i := range(n.mat) {
 		n.mat[i] = make(vec, len(All))
 	}
 
-	n.log = make([][]*Message, len(All))
 	n.oom = make([][]*Message, len(All))
+	n.log = make([][]*logEntry, len(All))
+	n.saw = make([]set, len(All))
+	n.wit = make([]set, len(All))
 }
 
 // This function implements each node's main event-loop goroutine.
 func (n *Node) runGossip(self int) {
 
 	// Spawn a receive goroutine for each peer
+	n.done.Add(len(All))
 	for i := range(All) {
 		go n.receiveGossip(i)
 	}
@@ -114,21 +182,19 @@ func (n *Node) runGossip(self int) {
 	n.advanceTLC(0) // broadcast message for initial time step
 
 	// Run the main loop until we hit the step limit if any
-	for MaxSteps == 0 || n.tmpl.step < MaxSteps {
+	for MaxSteps == 0 || n.tmpl.Step < MaxSteps {
 
 		msg := <-n.recv	// Accept a message from a receive goroutine
-		if msg.typ == Done {
-			break
-		}
-
+		n.mutex.Lock()
 		n.receiveTLC(msg)
+		n.mutex.Unlock()
 	}
 
 	// Kill all the peer connections
 	for i := range(All) {
-		n.comm[i] <- &Message{typ: Done}
+		n.peer[i].wr.Close()
 	}
 
-	n.done <- struct{}{}	// signal that we're done
+	n.done.Done()	// signal that the runGossip goroutine done
 }
 

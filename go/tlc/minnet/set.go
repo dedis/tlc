@@ -20,7 +20,7 @@ func (s set) add(msg *Message) {
 func (s set) copy(earliest int) set {
 	n := make(set)
 	for k, v := range s {
-		if k.step >= earliest {
+		if k.Step >= earliest {
 			n[k] = v
 		}
 	}

@@ -53,10 +53,10 @@ func TestQSC(t *testing.T) {
 	testRun(t, 1, 1, 10000, 0, 0)	// Trivial case: 1 of 1 consensus!
 	testRun(t, 2, 2, 10000, 0, 0)	// Another trivial case: 2 of 2
 
-	testRun(t, 2, 3, 10000, 0, 0)	// Standard f=1 case
-	testRun(t, 3, 5, 1000, 0, 0)	// Standard f=2 case
-	testRun(t, 4, 7, 1000, 0, 0)	// Standard f=3 case
-	testRun(t, 5, 9, 1000, 0, 0)	// Standard f=4 case
+	testRun(t, 2, 3, 1000, 0, 0)	// Standard f=1 case
+	testRun(t, 3, 5, 100, 0, 0)	// Standard f=2 case
+	testRun(t, 4, 7, 100, 0, 0)	// Standard f=3 case
+	testRun(t, 5, 9, 100, 0, 0)	// Standard f=4 case
 	testRun(t, 11, 21, 20, 0, 0)	// Standard f=10 case
 	//testRun(t, 101, 201, 10, 0, 0) // Standard f=100 case - blows up
 
@@ -66,15 +66,15 @@ func TestQSC(t *testing.T) {
 
 	// Test with low-entropy tickets:
 	// commit success rate will be bad, but still must remain safe!
-	testRun(t, 2, 3, 10000, 1, 0)	// Limit case: will never commit
-	testRun(t, 2, 3, 10000, 2, 0)	// Extreme low-entropy: rarely commits
-	testRun(t, 2, 3, 10000, 3, 0)	// A bit better bit still bad...
+	testRun(t, 2, 3, 1000, 1, 0)	// Limit case: will never commit
+	testRun(t, 2, 3, 1000, 2, 0)	// Extreme low-entropy: rarely commits
+	testRun(t, 2, 3, 1000, 3, 0)	// A bit better bit still bad...
 
 	// Test with random delays inserted
-	testRun(t, 2, 3, 10000, 0, 1 * time.Nanosecond)
+	testRun(t, 2, 3, 1000, 0, 1 * time.Nanosecond)
 	testRun(t, 2, 3, 1000, 0, 1 * time.Microsecond)
 	testRun(t, 2, 3, 100, 0, 1 * time.Millisecond)
-	testRun(t, 4, 7, 1000, 0, 1 * time.Microsecond)
+	testRun(t, 4, 7, 100, 0, 1 * time.Microsecond)
 	testRun(t, 4, 7, 100, 0, 1 * time.Millisecond)
 }
 

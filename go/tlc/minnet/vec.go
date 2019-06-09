@@ -1,7 +1,16 @@
 package minnet
 
+import (
+//	"fmt"
+)
+
 // Vector timestemp
 type vec []int
+
+// Return a copy of this vector
+func (x vec) copy() vec {
+	return append(vec{}, x...)
+}
 
 // Return true if vector timestamp x is causally before or equal to y.
 func (x vec) le(y vec) bool {
@@ -25,4 +34,7 @@ func (z vec) max(x, y vec) {
 	}
 }
 
+//func (v vec) String()  {
+//	fmt.Sprintf("%v", []int(v))
+//}
 

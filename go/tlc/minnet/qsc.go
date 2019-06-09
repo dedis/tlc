@@ -10,7 +10,7 @@ const RoundSteps = 3
 func (n *Node) advanceQSC(saw, wit set) {
 
 	// Calculate the starting step of the round that's just now completing.
-	s := n.tmpl.step - RoundSteps
+	s := n.tmpl.Step - RoundSteps
 	if s < 0 {
 		return	// Nothing to be done until the first round completes
 	}
@@ -20,10 +20,10 @@ func (n *Node) advanceQSC(saw, wit set) {
 	var bestProp *Message
 	var bestTicket int32
 	for p := range wit {
-		if p.typ != Prop { panic("wit should contain only proposals") }
-		if p.step == s+0 && p.ticket >= bestTicket {
+		if p.Typ != Prop { panic("wit should contain only proposals") }
+		if p.Step == s+0 && p.Ticket >= bestTicket {
 			bestProp = p
-			bestTicket = p.ticket
+			bestTicket = p.Ticket
 		}
 	}
 
@@ -35,7 +35,7 @@ func (n *Node) advanceQSC(saw, wit set) {
 	// Record the consensus results for this round (from s to s+3).
 	n.choice = append(n.choice, bestProp)
 	n.commit = append(n.commit, committed)
-	//println(n.tmpl.from, n.tmpl.step, "choice", bestProp.from, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
+	//println(n.self, n.tmpl.Step, "choice", bestProp.from, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
 
 	// Don't bother saving history before the start of the next round.
 	n.save = s+1
@@ -44,8 +44,8 @@ func (n *Node) advanceQSC(saw, wit set) {
 // Return true if there's another proposal competitive with a given candidate.
 func (n *Node) spoiledQSC(s int, saw set, prop *Message, ticket int32) bool {
 	for p := range saw {
-		if p.step == s+0 && p.typ == Prop && p != prop &&
-				p.ticket >= ticket {
+		if p.Step == s+0 && p.Typ == Prop && p != prop &&
+				p.Ticket >= ticket {
 			return true	// victory spoiled by competition!
 		}
 	}
@@ -55,7 +55,7 @@ func (n *Node) spoiledQSC(s int, saw set, prop *Message, ticket int32) bool {
 // Return true if given proposal was doubly confirmed (reconfirmed).
 func (n *Node) reconfirmedQSC(s int, wit set, prop *Message) bool {
 	for p := range wit {	// search for a paparazzi witness at s+1
-		if p.step == s+1 && p.wit.has(prop) {
+		if p.Step == s+1 && n.log[p.From][p.Seq].wit.has(prop) {
 			return true
 		}
 	}
