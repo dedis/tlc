@@ -35,7 +35,7 @@ func (n *Node) advanceTLC(step int) {
 	n.acks = make(set)	// No acknowledgments received yet in this step
 	n.wits = make(set)	// No threshold witnessed messages received yet
 
-	for i := range All {	// Prune ancient saw and wit set history
+	for i := range n.peer {	// Prune ancient saw and wit set history
 		n.saw[i] = n.saw[i].copy(n.save)
 		n.wit[i] = n.wit[i].copy(n.save)
 	}

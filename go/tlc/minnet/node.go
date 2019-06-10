@@ -4,13 +4,11 @@ import (
 	"time"
 	"sync"
 	"io"
-	"bufio"
 	"encoding/gob"
 )
 
 
 var Threshold int		// TLC and consensus threshold
-var All []*Node			// List of all nodes
 
 var MaxSteps int
 var MaxSleep time.Duration
@@ -73,50 +71,13 @@ type logEntry struct {
 type peer struct {
 	wr	*io.PipeWriter	// Write end of communication pipe
 	rd	*io.PipeReader	// Read end of communication pipe
-	bwr	*bufio.Writer	// Buffer for write end
-	brd	*bufio.Reader	// Buffer for read end
 	enc	*gob.Encoder	// Encoder into write end of communication pipe
 	dec	*gob.Decoder	// Decoder from read end of communication pipe
 }
 
-func newNode(self int) (n *Node) {
-	n = &Node{}
-	n.self = self
-	n.peer = make([]peer, len(All))
-	for i := range(All) {
-		n.peer[i].rd, n.peer[i].wr = io.Pipe()
-		n.peer[i].bwr = bufio.NewWriter(n.peer[i].wr)
-		n.peer[i].brd = bufio.NewReader(n.peer[i].rd)
-		n.peer[i].enc = gob.NewEncoder(n.peer[i].bwr)
-		n.peer[i].dec = gob.NewDecoder(n.peer[i].brd)
-	}
-
+func (n *Node) init() {
 	n.initGossip()
-	n.tmpl = Message{From: self, Step: 0}
+	n.tmpl = Message{From: n.self, Step: 0}
 	return
-}
-
-// Initialize and run the model for a given threshold and number of nodes.
-func Run(threshold, nnodes int) {
-
-	//println("Run config", threshold, "of", nnodes)
-
-	// Initialize the nodes
-	Threshold = threshold
-	All = make([]*Node, nnodes)
-	for i := range All {
-		All[i] = newNode(i)
-	}
-
-	// Run all the nodes asynchronously on separate goroutines
-	for i, n := range All {
-		n.done.Add(1)
-		go n.runGossip(i)
-	}
-
-	// Wait for all the nodes to complete their execution
-	for _, n := range All {
-		n.done.Wait()
-	}
 }
 

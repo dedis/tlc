@@ -23,7 +23,7 @@ func (n *Node) broadcastGossip(msg *Message) {
 	n.receiveTLC(msg)
 
 	// Send it to all other peers.
-	for dest := range All {
+	for dest := range n.peer {
 		if dest != n.self {
 			n.sendGossip(dest, msg)
 		}
@@ -35,7 +35,7 @@ func (n *Node) broadcastGossip(msg *Message) {
 func (n *Node) logGossip(peer int, msg *Message) *logEntry {
 
 	// Update peer's matrix clock and our record of what it saw by msg
-	for i := range All {
+	for i := range n.peer {
 		for n.mat[peer][i] < msg.Vec[i] {
 			n.sawGossip(peer, n.log[i][n.mat[peer][i]].msg)
 			n.mat[peer][i]++
@@ -66,15 +66,14 @@ func (n *Node) sendGossip(dest int, msg *Message) {
 	//println(n.self, n.tmpl.Step, "sendGossip to", dest, "typ", msg.Typ,
 	//	"seq", msg.Seq,
 	//	"avail", All[dest].peer[n.self].bwr.Available())
-
-	if err := All[dest].peer[n.self].enc.Encode(msg); err != nil {
+	if err := n.peer[dest].enc.Encode(msg); err != nil {
 		return	// panic("sendGossip encode: " + err.Error())
 	}
 	//println(n.self, n.tmpl.Step,
 	//	"  avail", All[dest].peer[n.self].bwr.Available())
-	if err := All[dest].peer[n.self].bwr.Flush(); err != nil {
-		return	// println("sendGossip flush: " + err.Error())
-	}
+	//if err := n.peer[dest].bwr.Flush(); err != nil {
+	//	return	// println("sendGossip flush: " + err.Error())
+	//}
 }
 
 // Receive a message from the underlying network into the gossip layer.
@@ -140,7 +139,7 @@ func (n *Node) enqueueGossip(msg *Message) {
 	// Deliver whatever messages we can consistently with causal order.
 	for progress := true; progress; {
 		progress = false
-		for i := range All {
+		for i := range n.peer {
 			if len(n.oom[i]) > 0 && n.oom[i][0] != nil &&
 					n.oom[i][0].Vec.le(n.mat[n.self]) {
 				//println(n.self, n.tmpl.Step, "enqueueGossip",
@@ -163,15 +162,15 @@ func (n *Node) enqueueGossip(msg *Message) {
 }
 
 func (n *Node) initGossip() {
-	n.recv = make(chan *Message, 3 *  len(All) * MaxSteps)
+	n.recv = make(chan *Message, 3 *  len(n.peer) * MaxSteps)
 
-	n.mat = make([]vec, len(All))
-	n.oom = make([][]*Message, len(All))
-	n.log = make([][]*logEntry, len(All))
-	n.saw = make([]set, len(All))
-	n.wit = make([]set, len(All))
-	for i := range All {
-		n.mat[i] = make(vec, len(All))
+	n.mat = make([]vec, len(n.peer))
+	n.oom = make([][]*Message, len(n.peer))
+	n.log = make([][]*logEntry, len(n.peer))
+	n.saw = make([]set, len(n.peer))
+	n.wit = make([]set, len(n.peer))
+	for i := range n.peer {
+		n.mat[i] = make(vec, len(n.peer))
 		n.saw[i] = make(set)
 		n.wit[i] = make(set)
 	}
@@ -181,8 +180,8 @@ func (n *Node) initGossip() {
 func (n *Node) runGossip(self int) {
 
 	// Spawn a receive goroutine for each peer
-	n.done.Add(len(All))
-	for i := range(All) {
+	n.done.Add(len(n.peer))
+	for i := range(n.peer) {
 		go n.receiveGossip(i)
 	}
 
@@ -198,7 +197,7 @@ func (n *Node) runGossip(self int) {
 	}
 
 	// Kill all the peer connections
-	for i := range(All) {
+	for i := range(n.peer) {
 		n.peer[i].wr.Close()
 	}
 
