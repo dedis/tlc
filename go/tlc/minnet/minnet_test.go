@@ -22,7 +22,7 @@ import (
 	"encoding/json"
 )
 
-var multiProcess bool = true
+var multiProcess bool = false
 
 func TestQSC(t *testing.T) {
 
@@ -284,19 +284,42 @@ func createCert(host string) ([]byte, *ecdsa.PrivateKey) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil { panic("createCert: " +err.Error()) }
 
+	notBefore := time.Now()				// valid starting now
+	notAfter := notBefore.Add(365*24*time.Hour)	// valid for a year
 	tmpl := x509.Certificate{
+		NotBefore: notBefore,
+		NotAfter: notAfter,
 		IsCA: true,
 		KeyUsage: x509.KeyUsageKeyEncipherment |
 			x509.KeyUsageDigitalSignature |
 			x509.KeyUsageCertSign,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth,
+						x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		DNSNames: []string{host},
 		SerialNumber: big.NewInt(1),
 	}
 	certb, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, 
 						&priv.PublicKey, priv)
-	if err != nil { panic("createCert: " +err.Error()) }
+	if err != nil { panic("createCert: " + err.Error()) }
+
+	cert, err := x509.ParseCertificate(certb)
+	if err != nil { panic("ParseCertificate: " + err.Error()) }
+
+	if err := cert.VerifyHostname(host); err != nil {
+		panic("VerifyHostname: " + err.Error())
+	}
+
+	// Sanity-check the certificate just to make sure it actually works.
+	pool := x509.NewCertPool()
+	pool.AddCert(cert)
+	vo := x509.VerifyOptions{ DNSName: host, Roots: pool }
+	chains, err := cert.Verify(vo)
+	if err != nil { panic("Verify: " + err.Error()) }
+	println(len(chains), "chains")
+	for i := range chains {
+		println("chain", i, "len", len(chains[i]))
+	}
 
 	return certb, priv
 }
@@ -349,7 +372,11 @@ func TestHelper(t *testing.T) {
 			// Enable TLS on it and run the handshake.
 			tlsc := tls.Server(tcpc, &config)
 			if err := tlsc.Handshake(); err != nil {
-				panic("Handshake: " + err.Error())
+				if e, ok := err.(x509.CertificateInvalidError); ok {
+					println("cert invalid reason", e.Reason,
+						"detail", e.Detail)
+				}
+				panic("Accept Handshake: " + err.Error())
 			}
 
 			println("ACCEPTED:")
@@ -378,7 +405,7 @@ func TestHelper(t *testing.T) {
 			panic("Dial: " + err.Error())
 		}
 		if err := conn.Handshake(); err != nil {
-			panic("Handshake: " + err.Error())
+			panic("Dial Handshake: " + err.Error())
 		}
 
 		conn.Write([]byte("FOOBAR"))
