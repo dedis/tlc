@@ -10,7 +10,6 @@ import (
 	"net"
 	"sync"
 	"os/exec"
-	"io/ioutil"
 	"context"
 	"crypto/x509"
 	crand "crypto/rand"
@@ -28,7 +27,10 @@ import (
 var MaxSleep time.Duration
 
 // Whether to run consensus among multiple separate processes
-var MultiProcess bool = true
+var MultiProcess bool = false
+
+// Whether to use TLS encryption and authentication atop TCP
+var UseTLS bool = true
 
 
 func TestQSC(t *testing.T) {
@@ -77,86 +79,8 @@ func testCase(t *testing.T, threshold, nnodes, maxSteps, maxTicket int,
 		MaxTicket = int32(maxTicket)
 		MaxSleep = maxSleep
 
-		if MultiProcess {
-			testExec(t, threshold, nnodes)
-		} else {
-			testLocal(t, threshold, nnodes)
-		}
+		testExec(t, threshold, nnodes)
 	})
-}
-
-// Initialize and run the model for a given threshold and number of nodes.
-func testLocal(t *testing.T, threshold, nnodes int) {
-	//println("Run config", threshold, "of", nnodes)
-
-	Threshold = threshold
-
-	// Initialize the nodes
-	all := make([]*Node, nnodes)
-	for i := range all {
-		all[i] = &Node{}
-		all[i].init(i, make([]peer, nnodes))
-	}
-	stepgrp := &sync.WaitGroup{}
-	donegrp := &sync.WaitGroup{}
-	for i := range all {
-		for j := range all {
-			rd, wr := io.Pipe()
-			enc := gob.NewEncoder(wr)
-			dec := gob.NewDecoder(rd)
-
-			// Node i gets a function to write to the pipe.
-			// It signals stepgrp.Done() after enough steps pass.
-			stepgrp.Add(1)
-			all[i].peer[j] = &testPeer{ enc, stepgrp, wr }
-
-			// Node j gets a receiver goroutine.
-			donegrp.Add(1)
-			go all[j].runReceiveNetwork(i, dec, donegrp)
-		}
-	}
-
-	// Launch all the nodes asynchronously on separate goroutines
-	for i, n := range all {
-		stepgrp.Add(1)
-		go n.startNetwork(i, stepgrp)
-	}
-
-	// First wait for all nodes to complete enough time-steps.
-	stepgrp.Wait()
-
-	// Now it's safe to close all the channels.
-	for i, n := range all {
-		n.mutex.Lock()
-		for j := range all {
-			all[i].peer[j].(*testPeer).c.Close()
-			all[i].peer[j].(*testPeer).e = nil
-		}
-		n.mutex.Unlock()
-	}
-
-	// Now wait for all the nodes to complete their execution
-	donegrp.Wait()
-
-	// Globally sanity-check and summarize each node's observed results
-	for i, n := range all {
-		commits := 0
-		for s, ch := range n.choice {
-			if ch.commit {
-				commits++
-				for _, nn := range all {
-					if len(nn.choice) > s &&
-							nn.choice[s].best !=
-							n.choice[s].best {
-						t.Fatalf("safety violation!" +
-							"step %v", s)
-					}
-				}
-			}
-		}
-		t.Logf("node %v committed %v of %v (%v%% success rate)",
-			i, commits, len(n.choice), (commits*100)/len(n.choice))
-	}
 }
 
 // Information passed to child processes via JSON
@@ -167,11 +91,6 @@ type testHost struct {
 }
 
 func testExec(t *testing.T, threshold, nnodes int) {
-
-	// Create a temporary directory for our key files
-	tmpdir, err := ioutil.TempDir("", "tlc")
-	if err != nil { t.Fatalf("TempDir: %v", err) }
-	defer os.RemoveAll(tmpdir)	// clean up afterwards
 
 	// Create a cancelable context in which to execute helper processes
 	ctx, cancel := context.WithCancel(context.Background())
@@ -241,7 +160,7 @@ func testExec(t *testing.T, threshold, nnodes int) {
 func testExecChild(t *testing.T, conf *testConfig, ctx context.Context,
 			grp *sync.WaitGroup) (io.Writer, io.Reader) {
 
-	if true {
+	if !MultiProcess {
 		// Run a child as a separate goroutine in the same process.
 		childInRd, childInWr := io.Pipe()
 		childOutRd, childOutWr := io.Pipe()
@@ -461,23 +380,25 @@ func testChild(in io.Reader, out io.Writer) {
 		}
 	}()
 
-	// Open TLS connections to each peer
+	// Open TCP and optionally TLS connections to each peer
 	//println(self, "open TLS connections to", len(host), "peers")
 	for i := range host {
 		// Open an authenticated TLS connection to peer i
 		peerConf := *tlsConf
 		peerConf.ServerName = host[i].Name
 		//println(self, "Dial", host[i].Name, host[i].Addr)
-		tlsc, err := tls.Dial("tcp", host[i].Addr, &peerConf)
+		var conn net.Conn
+		if UseTLS {
+			conn, err = tls.Dial("tcp", host[i].Addr, &peerConf)
+		} else {
+			conn, err = net.Dial("tcp", host[i].Addr)
+		}
 		if err != nil {
 			panic("Dial: " + err.Error())
 		}
-		if err := tlsc.Handshake(); err != nil {
-			panic("Dial Handshake: " + err.Error())
-		}
 
 		// Tell the server which client we are.
-		enc := gob.NewEncoder(tlsc)
+		enc := gob.NewEncoder(conn)
 		if err := enc.Encode(self); err != nil {
 			panic("gob.Encode: " + err.Error())
 		}
@@ -485,13 +406,11 @@ func testChild(in io.Reader, out io.Writer) {
 		// Set up a peer sender object.
 		// It signals stepgrp.Done() after enough steps pass.
 		stepgrp.Add(1)
-		n.peer[i] = &testPeer{ enc, stepgrp, tlsc }
+		n.peer[i] = &testPeer{ enc, stepgrp, conn }
 	}
 	//println(self, "opened TLS connections")
 
 	// Start the consensus test
-	//stepgrp.Add(1)
-	//go n.startNetwork(self, stepgrp)
 	n.advanceTLC(0)
 
 	// Now we can let the receive goroutines process incoming messages
@@ -541,23 +460,17 @@ func readFile(name string) []byte {
 }
 
 // Accept a new TLS connection on a TCP server socket.
-func (n *Node) acceptNetwork(tcpc net.Conn, tlsConf *tls.Config,
+func (n *Node) acceptNetwork(conn net.Conn, tlsConf *tls.Config,
 				host []testHost, donegrp *sync.WaitGroup) {
 
-	// Enable TLS on thhe connection and run the handshake.
-	tlsc := tls.Server(tcpc, tlsConf)
-	defer func() {
-		tlsc.Close()
-		//if r := recover(); r != nil {
-		//	println("acceptNetwork recover: ", r)
-		//}
-	}()
-	//if err := tlsc.Handshake(); err != nil {	// XXX unnecessary?
-	//	panic("Accept Handshake: " + err.Error())
-	//}
+	// Enable TLS on the connection and run the handshake.
+	if UseTLS {
+		conn = tls.Server(conn, tlsConf)
+	}
+	defer func() { conn.Close() }()
 
-	// Determine and authenticate the client
-	dec := gob.NewDecoder(tlsc)
+	// Receive the client's nodenumber indication
+	dec := gob.NewDecoder(conn)
 	var peer int
 	if err := dec.Decode(&peer); err != nil {
 		println(n.self, "acceptNetwork gob.Decode: " + err.Error())
@@ -568,20 +481,24 @@ func (n *Node) acceptNetwork(tcpc net.Conn, tlsConf *tls.Config,
 		println("acceptNetwork: bad peer number")
 		return
 	}
+
+	// Authenticate the client with TLS.
 	// XXX Why doesn't VerifyHostname work to verify a client auth?
 	// Go TLS bug to report?
 	//if err := tlsc.VerifyHostname(host[peer].Name); err != nil {
 	//	panic("VerifyHostname: " + err.Error())
 	//}
-	cs := tlsc.ConnectionState()
-	if len(cs.PeerCertificates) < 1 {
-		println("acceptNetwork: no certificate from client")
-		return
-	}
-	if err := cs.PeerCertificates[0].VerifyHostname(host[peer].Name);
-			err != nil {
-		println("VerifyHostname: " + err.Error())
-		return
+	if UseTLS {
+		cs := conn.(*tls.Conn).ConnectionState()
+		if len(cs.PeerCertificates) < 1 {
+			println("acceptNetwork: no certificate from client")
+			return
+		}
+		err := cs.PeerCertificates[0].VerifyHostname(host[peer].Name)
+		if err != nil {
+			println("VerifyHostname: " + err.Error())
+			return
+		}
 	}
 
 	// Receive and process arriving messages
@@ -626,16 +543,6 @@ func (n *Node) receiveNetwork(msg *Message, grp *sync.WaitGroup) {
 	//println(n.self, n.tmpl.Step, "receiveNetwork from", msg.From,
 	//	"type", msg.Typ,  "seq", msg.Seq, "vec", len(msg.Vec))
 	n.receiveGossip(msg)
-}
-
-func (n *Node) startNetwork(self int, grp *sync.WaitGroup) {
-	n.mutex.Lock()
-	defer func() {
-		n.mutex.Unlock()
-		grp.Done()
-	}()
-
-	n.advanceTLC(0) // broadcast message for initial time step
 }
 
 
