@@ -1,8 +1,5 @@
 package minnet
 
-import (
-//	"fmt"
-)
 
 // Vector timestemp
 type vec []int

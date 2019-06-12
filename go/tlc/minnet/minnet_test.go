@@ -33,6 +33,25 @@ var MultiProcess bool = true
 var UseTLS bool = true
 
 
+// Information about each virtual host passed to child processes via JSON
+type testHost struct {
+	Name	string		// Virtual host name
+	Addr	string		// Host IP address and TCP port
+	Cert	[]byte		// Host's self-signed x509 certificate
+}
+
+// Configuration information each child goroutine or process needs to launch
+type testConfig struct {
+	Self	int		// Which participant number we are
+	Nnodes	int		// Total number of participants
+	HostName string		// This child's virtual hostname
+
+	MaxSteps int
+	MaxTicket int32
+	MaxSleep time.Duration
+}
+
+
 func TestQSC(t *testing.T) {
 
 	testCase(t, 1, 1, 10000, 0, 0)	// Trivial case: 1 of 1 consensus!
@@ -81,13 +100,6 @@ func testCase(t *testing.T, threshold, nnodes, maxSteps, maxTicket int,
 
 		testExec(t, threshold, nnodes)
 	})
-}
-
-// Information passed to child processes via JSON
-type testHost struct {
-	Name	string		// Virtual host name
-	Addr	string		// Host IP address and TCP port
-	Cert	[]byte		// Host's self-signed x509 certificate
 }
 
 func testExec(t *testing.T, threshold, nnodes int) {
@@ -440,37 +452,6 @@ func testChild(in io.Reader, out io.Writer) {
 	//println(self, "child finished")
 }
 
-func writeFile(name string, data []byte) {
-	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		panic("OpenFile: %v" + err.Error())
-	}
-	_, err = f.Write(data)
-	if err != nil {
-		panic("Write: %v" + err.Error())
-	}
-	err =  f.Close()
-	if err != nil {
-		panic("Close: %v" + err.Error())
-	}
-}
-
-func readFile(name string) []byte {
-	f, err := os.Open(name)
-	if err != nil {
-		panic("OpenFile: %v" + err.Error())
-	}
-	buf := bytes.NewBuffer(nil)
-	if _, err := buf.ReadFrom(f); err != nil {
-		panic("ReadFrom: %v" + err.Error())
-	}
-	err =  f.Close()
-	if err != nil {
-		panic("Close: %v" + err.Error())
-	}
-	return buf.Bytes()
-}
-
 // Accept a new TLS connection on a TCP server socket.
 func (n *Node) acceptNetwork(conn net.Conn, tlsConf *tls.Config,
 				host []testHost, donegrp *sync.WaitGroup) {
@@ -555,18 +536,6 @@ func (n *Node) receiveNetwork(msg *Message, grp *sync.WaitGroup) {
 	//println(n.self, n.tmpl.Step, "receiveNetwork from", msg.From,
 	//	"type", msg.Typ,  "seq", msg.Seq, "vec", len(msg.Vec))
 	n.receiveGossip(msg)
-}
-
-
-// Configuration information each child process needs to launch
-type testConfig struct {
-	Self	int		// Which participant number we are
-	Nnodes	int		// Total number of participants
-	HostName string		// This child's virtual hostname
-
-	MaxSteps int
-	MaxTicket int32
-	MaxSleep time.Duration
 }
 
 

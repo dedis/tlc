@@ -1,9 +1,5 @@
-// XXX rename causality or vectime layer
+// XXX rename causality or vectime layer?
 package minnet
-
-import (
-//	"fmt"
-)
 
 // Broadcast a copy of our current message template to all nodes.
 func (n *Node) broadcastGossip(msg *Message) {
