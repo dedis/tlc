@@ -1,4 +1,4 @@
-package minnet
+package dist
 
 
 // Use a map to represent a set of messages

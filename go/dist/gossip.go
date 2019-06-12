@@ -1,5 +1,6 @@
+package dist
+
 // XXX rename causality or vectime layer?
-package minnet
 
 // Broadcast a copy of our current message template to all nodes.
 func (n *Node) broadcastGossip(msg *Message) {
