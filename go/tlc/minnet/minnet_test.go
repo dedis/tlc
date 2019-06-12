@@ -27,7 +27,7 @@ import (
 var MaxSleep time.Duration
 
 // Whether to run consensus among multiple separate processes
-var MultiProcess bool = false
+var MultiProcess bool = true
 
 // Whether to use TLS encryption and authentication atop TCP
 var UseTLS bool = true
@@ -149,6 +149,13 @@ func testExec(t *testing.T, threshold, nnodes int) {
 	for i := range host {
 		if  err := dec[i].Decode(&hist[i]); err != nil {
 			t.Fatalf("Decode: %v", err.Error())
+		}
+	}
+
+	// Let all the children know they can exit
+	for i := range host {
+		if err := enc[i].Encode(struct{}{}); err != nil {
+			t.Fatalf("Encode: " + err.Error())
 		}
 	}
 
@@ -363,8 +370,7 @@ func testChild(in io.Reader, out io.Writer) {
 	}
 	//println("hostName", conf.HostName, "pool", len(pool.Subjects()))
 
-	// Listen and accept TLS connections
-	stepgrp := &sync.WaitGroup{}
+	// Listen and accept TCP/TLS connections
 	donegrp := &sync.WaitGroup{}
 	go func() {
 		for {
@@ -382,6 +388,7 @@ func testChild(in io.Reader, out io.Writer) {
 
 	// Open TCP and optionally TLS connections to each peer
 	//println(self, "open TLS connections to", len(host), "peers")
+	stepgrp := &sync.WaitGroup{}
 	for i := range host {
 		// Open an authenticated TLS connection to peer i
 		peerConf := *tlsConf
@@ -423,6 +430,11 @@ func testChild(in io.Reader, out io.Writer) {
 	// Report our observed consensus history to the parent
 	if err := enc.Encode(n.choice); err != nil {
 		panic("Encode: " + err.Error())
+	}
+
+	// Finally, wait for our parent to signal when the test is complete.
+	if err := dec.Decode(&struct{}{}); err != nil {
+		panic("Decode: " + err.Error())
 	}
 
 	//println(self, "child finished")
