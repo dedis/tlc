@@ -2,14 +2,14 @@
 package minnet
 
 import (
-	"time"
-	"math/rand"
-	"io"
 //	"fmt"
 )
 
 // Broadcast a copy of our current message template to all nodes.
 func (n *Node) broadcastGossip(msg *Message) {
+
+	//println(n.self, n.tmpl.Step, "broadcastGossip",
+	//	"mat", len(n.mat))
 
 	// Assign the new message a sequence number
 	msg.Seq = len(n.log[n.self])		// Assign sequence number
@@ -36,6 +36,7 @@ func (n *Node) logGossip(peer int, msg *Message) *logEntry {
 
 	// Update peer's matrix clock and our record of what it saw by msg
 	for i := range n.peer {
+		//println(i, "mat", len(n.mat), "vec", len(msg.Vec))
 		for n.mat[peer][i] < msg.Vec[i] {
 			n.sawGossip(peer, n.log[i][n.mat[peer][i]].msg)
 			n.mat[peer][i]++
@@ -64,55 +65,17 @@ func (n *Node) sawGossip(peer int, msg *Message) {
 // Transmit a message to a particular node.
 func (n *Node) sendGossip(dest int, msg *Message) {
 	//println(n.self, n.tmpl.Step, "sendGossip to", dest, "typ", msg.Typ,
-	//	"seq", msg.Seq,
-	//	"avail", All[dest].peer[n.self].bwr.Available())
-	if err := n.peer[dest].enc.Encode(msg); err != nil {
-		return	// panic("sendGossip encode: " + err.Error())
-	}
-	//println(n.self, n.tmpl.Step,
-	//	"  avail", All[dest].peer[n.self].bwr.Available())
-	//if err := n.peer[dest].bwr.Flush(); err != nil {
-	//	return	// println("sendGossip flush: " + err.Error())
-	//}
+	//	"seq", msg.Seq)
+	n.peer[dest].Send(msg)
 }
 
-// Receive a message from the underlying network into the gossip layer.
-func (n *Node) receiveGossip(peer int) {
-	for  {
-		// Get next message from this peer
-		msg := Message{}
-		err := n.peer[peer].dec.Decode(&msg)
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			println(n.self, "receiveGossip:", err.Error())
-		}
-		//println(n.self, n.tmpl.Step, "receiveGossip from", msg.From,
-		//	"type", msg.Typ, "seq", msg.Seq)
-
-		// Optionally insert random delays on a message basis
-		time.Sleep(time.Duration(rand.Int63n(int64(MaxSleep+1))))
-
-		n.done.Add(1)
-		go n.enqueueGossip(&msg)
-	}
-	n.done.Done()	// signal that we're done
-}
-
-// Enqueue a possibly out-of-order message for delivery,
-// and actually deliver messages as soon as we can.
-func (n *Node) enqueueGossip(msg *Message) {
-
-	n.mutex.Lock()
-	defer func() {
-		n.mutex.Unlock()
-		n.done.Done()
-	}()
+// Receive a possibly out-of-order message from the network.
+// Enqueue it and actually deliver messages as soon as we can.
+func (n *Node) receiveGossip(msg *Message) {
 
 	// Unicast acknowledgments don't get sequence numbers or reordering.
 	if msg.Typ == Ack {
-		n.recv <- msg	// Pass to node's main goroutine
-		// XXX just dispatch to upper layers directly?
+		n.receiveTLC(msg)	// Just send it up the stack
 		return
 	}
 
@@ -125,7 +88,7 @@ func (n *Node) enqueueGossip(msg *Message) {
 	}
 
 	// Enqueue broadcast message for delivery in causal order.
-	//println(n.self, n.tmpl.Step, "enqueueGossip from", msg.From,
+	//println(n.self, n.tmpl.Step, "receiveGossip from", msg.From,
 	//	"type", msg.Typ, "seq", msg.Seq,
 	//	"vec", fmt.Sprintf("%v", msg.Vec))
 	//if len(n.oom[msg.From]) <= msg.Seq - n.mat[n.self][msg.From] - 1000 {
@@ -154,7 +117,7 @@ func (n *Node) enqueueGossip(msg *Message) {
 				}
 				n.oom[i] = n.oom[i][1:]
 				//println("  new #oom", len(n.oom[i]))
-				n.recv  <- ent.msg
+				n.receiveTLC(ent.msg)
 				progress = true
 			}
 		}
@@ -162,8 +125,6 @@ func (n *Node) enqueueGossip(msg *Message) {
 }
 
 func (n *Node) initGossip() {
-	n.recv = make(chan *Message, 3 *  len(n.peer) * MaxSteps)
-
 	n.mat = make([]vec, len(n.peer))
 	n.oom = make([][]*Message, len(n.peer))
 	n.log = make([][]*logEntry, len(n.peer))
@@ -174,33 +135,5 @@ func (n *Node) initGossip() {
 		n.saw[i] = make(set)
 		n.wit[i] = make(set)
 	}
-}
-
-// This function implements each node's main event-loop goroutine.
-func (n *Node) runGossip(self int) {
-
-	// Spawn a receive goroutine for each peer
-	n.done.Add(len(n.peer))
-	for i := range(n.peer) {
-		go n.receiveGossip(i)
-	}
-
-	n.advanceTLC(0) // broadcast message for initial time step
-
-	// Run the main loop until we hit the step limit if any
-	for MaxSteps == 0 || n.tmpl.Step < MaxSteps {
-
-		msg := <-n.recv	// Accept a message from a receive goroutine
-		n.mutex.Lock()
-		n.receiveTLC(msg)
-		n.mutex.Unlock()
-	}
-
-	// Kill all the peer connections
-	for i := range(n.peer) {
-		n.peer[i].wr.Close()
-	}
-
-	n.done.Done()	// signal that the runGossip goroutine done
 }
 

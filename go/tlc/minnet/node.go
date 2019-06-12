@@ -1,17 +1,13 @@
 package minnet
 
 import (
-	"time"
 	"sync"
-	"io"
-	"encoding/gob"
 )
 
 
 var Threshold int		// TLC and consensus threshold
 
 var MaxSteps int
-var MaxSleep time.Duration
 var MaxTicket int32 = 100	// Amount of entropy in lottery tickets
 
 
@@ -38,27 +34,30 @@ type Message struct {
 }
 
 type Node struct {
+	// Network/peering layer
 	self	int		// This node's participant number
-	peer	[]peer		// Channels to send messages to this node
-	recv	chan *Message	// Node-internal message receive channel
+	peer	[]peer		// How to send messages to each peer
 	mutex	sync.Mutex	// Mutex protecting node's protocol stack
 
-	tmpl	Message		// Template for messages we send
-	save	int		// Earliest step for which we maintain history
-	acks	set		// Acknowledgments we've received in this step
-	wits	set		// Threshold witnessed messages seen this step
-
+	// Causal history layer
 	mat	[]vec		// Node's current matrix clock
 	oom	[][]*Message	// Out-of-order messages not yet delivered
 	log	[][]*logEntry	// Nodes' message received and delivered by seq
 	saw	[]set		// Messages each node saw recently
 	wit	[]set		// Witnessed messages each node saw recently
 
-	// This node's record of QSC consensus history
-	choice	[]*Message	// Best proposal this node chose each round
-	commit	[]bool		// Whether we observed successful commitment
+	// Threshold time (TLC) layer
+	tmpl	Message		// Template for messages we send
+	save	int		// Earliest step for which we maintain history
+	acks	set		// Acknowledgments we've received in this step
+	wits	set		// Threshold witnessed messages seen this step
 
-	done	sync.WaitGroup	// Barrier to synchronize goroutine termination
+	// This node's record of QSC consensus history
+	choice	[]choice	// Best proposal this node chose each round
+}
+
+type peer interface {
+	Send(msg *Message)
 }
 
 // Per-sequence info each node tracks and logs about all other nodes' histories
@@ -68,15 +67,18 @@ type logEntry struct {
 	wit	set		// Threshold witnessed messages it had seen
 }
 
-type peer struct {
-	wr	*io.PipeWriter	// Write end of communication pipe
-	rd	*io.PipeReader	// Read end of communication pipe
-	enc	*gob.Encoder	// Encoder into write end of communication pipe
-	dec	*gob.Decoder	// Decoder from read end of communication pipe
+// Record of one node's QSC decision in one time-step
+type choice struct {
+	best	int		// Best proposal this node chose in this round
+	commit	bool		// Whether node observed successful commitment
 }
 
-func (n *Node) init() {
+func (n *Node) init(self int, peer []peer) {
+	n.self = self
+	n.peer = peer
+
 	n.initGossip()
+
 	n.tmpl = Message{From: n.self, Step: 0}
 	return
 }
