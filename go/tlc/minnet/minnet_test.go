@@ -33,7 +33,7 @@ var MultiProcess bool = true
 
 func TestQSC(t *testing.T) {
 
-	testCase(t, 1, 1, 100000, 0, 0)	// Trivial case: 1 of 1 consensus!
+	testCase(t, 1, 1, 10000, 0, 0)	// Trivial case: 1 of 1 consensus!
 	testCase(t, 2, 2, 10000, 0, 0)	// Another trivial case: 2 of 2
 
 	testCase(t, 2, 3, 1000, 0, 0)	// Standard f=1 case
@@ -43,19 +43,19 @@ func TestQSC(t *testing.T) {
 	testCase(t, 11, 21, 20, 0, 0)	// Standard f=10 case
 	//testCase(t, 101, 201, 10, 0, 0) // Standard f=100 case - blows up
 
-	testCase(t, 3, 3, 1000, 0, 0)	// Larger-than-minimum thresholds
-	testCase(t, 6, 7, 1000, 0, 0)
+	testCase(t, 3, 3, 100, 0, 0)	// Larger-than-minimum thresholds
+	testCase(t, 6, 7, 100, 0, 0)
 	testCase(t, 9, 10, 100, 0, 0)
 
 	// Test with low-entropy tickets:
 	// commit success rate will be bad, but still must remain safe!
-	testCase(t, 2, 3, 1000, 1, 0)	// Limit case: will never commit
-	testCase(t, 2, 3, 1000, 2, 0)	// Extreme low-entropy: rarely commits
-	testCase(t, 2, 3, 1000, 3, 0)	// A bit better bit still bad...
+	testCase(t, 2, 3, 10, 1, 0)	// Limit case: will never commit
+	testCase(t, 2, 3, 100, 2, 0)	// Extreme low-entropy: rarely commits
+	testCase(t, 2, 3, 100, 3, 0)	// A bit better bit still bad...
 
 	// Test with random delays inserted
-	testCase(t, 2, 3, 1000, 0, 1 * time.Nanosecond)
-	testCase(t, 2, 3, 1000, 0, 1 * time.Microsecond)
+	testCase(t, 2, 3, 100, 0, 1 * time.Nanosecond)
+	testCase(t, 2, 3, 100, 0, 1 * time.Microsecond)
 	testCase(t, 2, 3, 100, 0, 1 * time.Millisecond)
 	testCase(t, 4, 7, 100, 0, 1 * time.Microsecond)
 	testCase(t, 4, 7, 100, 0, 1 * time.Millisecond)
@@ -163,6 +163,7 @@ func testLocal(t *testing.T, threshold, nnodes int) {
 type testHost struct {
 	Name	string		// Virtual host name
 	Addr	string		// Host IP address and TCP port
+	Cert	[]byte		// Host's self-signed x509 certificate
 }
 
 func testExec(t *testing.T, threshold, nnodes int) {
@@ -177,73 +178,20 @@ func testExec(t *testing.T, threshold, nnodes int) {
 	defer cancel()			// kill child processes
 
 	// Create a public/private keypair and self-signed cert for each node.
-	host := make([]testHost, nnodes) // each node's host name and addr
 	conf := make([]testConfig, nnodes) // each node's config information
-	rootfn := fmt.Sprintf("%v/cert.pem", tmpdir)
-	rootf, err := os.Create(rootfn)
-	if err != nil {
-		panic("Create: " + err.Error())
-	}
-	for i := range host {
-		host[i].Name = fmt.Sprintf("host%v", i)
+	for i := range conf {
 		conf[i].Self = i
 		conf[i].Nnodes = nnodes
-		conf[i].HostName = host[i].Name
-		conf[i].Rootfn = rootfn
+		conf[i].HostName = fmt.Sprintf("host%v", i)
 		conf[i].MaxSteps = MaxSteps
 		conf[i].MaxTicket = MaxTicket
 		conf[i].MaxSleep = MaxSleep
-
-		println(i, "createCert for", host[i].Name)
-		certb, priv := createCert(host[i].Name)
-
-		// Write the PEM-encoded cert to our root certs file
-		if err := pem.Encode(rootf, &pem.Block{Type: "CERTIFICATE",
-					Bytes: certb});  err != nil  {
-			panic("pem.Encode: " + err.Error())
-		}
-
-		// PEM-encode this host's cert into a per-host cert file
-		conf[i].Crtfn = fmt.Sprintf("%v/cert-%v.pem",
-					tmpdir, host[i].Name)
-		crtf, err := os.Create(conf[i].Crtfn)
-		if err != nil {
-			panic("Create: " + err.Error())
-		}
-		if err := pem.Encode(crtf, &pem.Block{Type: "CERTIFICATE",
-					Bytes: certb});  err != nil  {
-			panic("pem.Encode: " + err.Error())
-		}
-		if err := crtf.Close(); err != nil {
-			panic("Close: " + err.Error())
-		}
-
-		// PEM-encode this host's private key
-		// XXX better to let the child generate it and send us its cert
-		conf[i].Keyfn = fmt.Sprintf("%v/key-%v.pem",
-					tmpdir, host[i].Name)
-		privb, err := x509.MarshalECPrivateKey(priv)
-		if err != nil {
-			t.Fatalf("x509.MarshalECPrivateKey: %v", err.Error())
-		}
-		keyf, err := os.Create(conf[i].Keyfn)
-		if err != nil {
-			panic("Create: " + err.Error())
-		}
-		if err := pem.Encode(keyf, &pem.Block{Type: "EC PRIVATE KEY",
-					Bytes: privb}); err != nil {
-			panic("pem.Encode: " + err.Error())
-		}
-		if err := keyf.Close(); err != nil {
-			panic("Close: " + err.Error())
-		}
-	}
-	if err := rootf.Close(); err != nil {
-		panic("Close: " + err.Error())
 	}
 
-	// Start the per-node child processes
+	// Start the per-node child processes,
+	// and gather network addresses and certificates from each one.
 	childGroup := &sync.WaitGroup{}
+	host := make([]testHost, nnodes)
 	enc := make([]*json.Encoder, nnodes)
 	dec := make([]*json.Decoder, nnodes)
 	for i := range host {
@@ -261,8 +209,11 @@ func testExec(t *testing.T, threshold, nnodes int) {
 		}
 
 		// Get the network address the child is listening on
-		if  err := dec[i].Decode(&host[i].Addr); err != nil {
+		if  err := dec[i].Decode(&host[i]); err != nil {
 			t.Fatalf("Decode: %v", err.Error())
+		}
+		if host[i].Name != conf[i].HostName {	// sanity check
+			panic("hostname mismatch")
 		}
 		//println("child", i, "listening on", host[i].Addr)
 	}
@@ -360,7 +311,7 @@ func copyAll(dst io.Writer, src io.Reader) {
 	}
 }
 
-func createCert(hostName string) ([]byte, *ecdsa.PrivateKey) {
+func createCert(hostName string) (certPemBytes, privPemBytes []byte) {
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), crand.Reader)
 	if err != nil { panic("createCert: " +err.Error()) }
@@ -398,9 +349,27 @@ func createCert(hostName string) ([]byte, *ecdsa.PrivateKey) {
 	if _, err := cert.Verify(vo); err != nil {
 		panic("Verify: " + err.Error())
 	}
-	println("verified for", hostName)
+	//println("verified for", hostName)
 
-	return certb, priv
+	// PEM-encode our certificate
+	certPem := bytes.NewBuffer(nil)
+	if err := pem.Encode(certPem, &pem.Block{Type: "CERTIFICATE",
+				Bytes: certb});  err != nil  {
+		panic("pem.Encode: " + err.Error())
+	}
+
+	// PEM-encode our private key
+	privb, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		panic("x509.MarshalECPrivateKey: " + err.Error())
+	}
+	privPem := bytes.NewBuffer(nil)
+	if err := pem.Encode(privPem, &pem.Block{Type: "EC PRIVATE KEY",
+				Bytes: privb}); err != nil {
+		panic("pem.Encode: " + err.Error())
+	}
+
+	return certPem.Bytes(), privPem.Bytes()
 }
 
 func testChild(in io.Reader, out io.Writer) {
@@ -420,47 +389,60 @@ func testChild(in io.Reader, out io.Writer) {
 	MaxSleep = conf.MaxSleep
 
 	// Initialize the node appropriately
-	println("self", self, "nnodes", conf.Nnodes)
+	//println("self", self, "nnodes", conf.Nnodes)
 	n := &Node{}
 	n.init(self, make([]peer, conf.Nnodes))
+	n.mutex.Lock()	// keep node's TLC state locked until fully set up
 
-	// Read our certificate and private key
-	println(self, "load cert from", conf.Crtfn, conf.Keyfn)
-	crt, err := tls.LoadX509KeyPair(conf.Crtfn, conf.Keyfn)
-	if err != nil {
-		panic("tls.LoadX509KeyPair: " + err.Error())
-	}
-
-	// Create a certificate pool containing all nodes' certificates
-	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM(readFile(conf.Rootfn))
-
-	// Configure TLS
-	tlsConf := &tls.Config{
-		RootCAs: pool,
-		Certificates: []tls.Certificate{crt},
-		ServerName: conf.HostName,
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs: pool,
-	}
-	println("hostName", conf.HostName, "pool", len(pool.Subjects()))
-
-	// Create a TLS/TCP listen socket
+	// Create a TLS/TCP listen socket for this child
 	tcpl, err := net.Listen("tcp", "")
 	if err != nil {
 		panic("Listen: " + err.Error())
 	}
 
-	// Report the listener's network address to the parent process
-	if err := enc.Encode(tcpl.Addr().String()); err != nil {
+	// Create an x509 certificate and private key for this child
+	//println(self, "createCert for", conf.HostName)
+	certb, privb := createCert(conf.HostName)
+
+	// Create a TLS certificate from it
+	tlscert, err := tls.X509KeyPair(certb, privb)
+	if err != nil {
+		panic("tls.X509KeyPair: " + err.Error())
+	}
+
+	// Report our network address and certificate to the parent process
+	myHost := testHost{
+			Name: conf.HostName,
+			Addr: tcpl.Addr().String(),
+			Cert: certb,
+		}
+	if err := enc.Encode(myHost); err != nil {
 		panic("Encode: " + err.Error())
 	}
 
-	// Get the JSON list of host names and addresses from the parent
+	// Get the list of all host names, addresses, and certs from the parent
 	host := []testHost{}
 	if err := dec.Decode(&host); err != nil {
 		panic("Decode: " + err.Error())
 	}
+
+	// Create a certificate pool containing all nodes' certificates
+	pool := x509.NewCertPool()
+	for i := range host {
+		if !pool.AppendCertsFromPEM(host[i].Cert) {
+			panic("failed to append cert from " + host[i].Name)
+		}
+	}
+
+	// Configure TLS
+	tlsConf := &tls.Config{
+		RootCAs: pool,
+		Certificates: []tls.Certificate{tlscert},
+		ServerName: conf.HostName,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs: pool,
+	}
+	//println("hostName", conf.HostName, "pool", len(pool.Subjects()))
 
 	// Listen and accept TLS connections
 	stepgrp := &sync.WaitGroup{}
@@ -480,42 +462,43 @@ func testChild(in io.Reader, out io.Writer) {
 	}()
 
 	// Open TLS connections to each peer
-	println(self, "open TLS connections to", len(host), "peers")
-	for i, h := range host {
-		println(self, "host", i, h.Name, h.Addr)
-	}
+	//println(self, "open TLS connections to", len(host), "peers")
 	for i := range host {
-		println(self, "Dial", host[i].Name, host[i].Addr)
-		tlsc, err := tls.Dial("tcp", host[i].Addr, tlsConf)
+		// Open an authenticated TLS connection to peer i
+		peerConf := *tlsConf
+		peerConf.ServerName = host[i].Name
+		//println(self, "Dial", host[i].Name, host[i].Addr)
+		tlsc, err := tls.Dial("tcp", host[i].Addr, &peerConf)
 		if err != nil {
 			panic("Dial: " + err.Error())
 		}
-		println(self, "to", i, "Dial Handshake")
 		if err := tlsc.Handshake(); err != nil {
 			panic("Dial Handshake: " + err.Error())
 		}
-		println(self, "to", i, "Handshake: no error!")
 
 		// Tell the server which client we are.
 		enc := gob.NewEncoder(tlsc)
 		if err := enc.Encode(self); err != nil {
 			panic("gob.Encode: " + err.Error())
 		}
-		println(self, "to", i, "sent self")
 
 		// Set up a peer sender object.
 		// It signals stepgrp.Done() after enough steps pass.
 		stepgrp.Add(1)
 		n.peer[i] = &testPeer{ enc, stepgrp, tlsc }
 	}
-	println(self, "opened TLS connections")
+	//println(self, "opened TLS connections")
 
 	// Start the consensus test
-	stepgrp.Add(1)
-	go n.startNetwork(self, stepgrp)
+	//stepgrp.Add(1)
+	//go n.startNetwork(self, stepgrp)
+	n.advanceTLC(0)
+
+	// Now we can let the receive goroutines process incoming messages
+	n.mutex.Unlock()
 
 	// Wait to finish enough consensus rounds
-	println(self, "wait for test to complete")
+	//println(self, "wait for test to complete")
 	stepgrp.Wait()
 
 	// Report our observed consensus history to the parent
@@ -523,7 +506,7 @@ func testChild(in io.Reader, out io.Writer) {
 		panic("Encode: " + err.Error())
 	}
 
-	println(self, "child finished")
+	//println(self, "child finished")
 }
 
 func writeFile(name string, data []byte) {
@@ -661,9 +644,6 @@ type testConfig struct {
 	Self	int		// Which participant number we are
 	Nnodes	int		// Total number of participants
 	HostName string		// This child's virtual hostname
-	Rootfn	string		// File name of all nodes' certificates
-	Crtfn	string		// File name of node's certificate
-	Keyfn	string		// File name of node's private key
 
 	MaxSteps int
 	MaxTicket int32
@@ -686,7 +666,7 @@ func (tp *testPeer) Send(msg *Message) {
 		}
 	}
 	if tp.w != nil && MaxSteps > 1 && msg.Step >= MaxSteps {
-		println("testPeer.Send done")
+		//println("testPeer.Send done")
 		tp.w.Done()
 		tp.w = nil
 	}

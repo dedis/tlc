@@ -4,6 +4,14 @@ import (
 	"math/rand"
 )
 
+
+
+// Initialize the TLC layer state in a Node
+func (n *Node) initTLC() {
+	n.tmpl = Message{From: n.self, Step: -1}
+}
+
+
 // Broadcast a copy of our current message template to all nodes
 func (n *Node) broadcastTLC() *Message {
 

@@ -135,5 +135,7 @@ func (n *Node) initGossip() {
 		n.saw[i] = make(set)
 		n.wit[i] = make(set)
 	}
+
+	n.initTLC()
 }
 

@@ -78,8 +78,6 @@ func (n *Node) init(self int, peer []peer) {
 	n.peer = peer
 
 	n.initGossip()
-
-	n.tmpl = Message{From: n.self, Step: 0}
-	return
+	n.initTLC()
 }
 
