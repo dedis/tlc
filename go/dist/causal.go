@@ -7,7 +7,7 @@ func (n *Node) broadcastCausal(msg *Message) {
 	//	"mat", len(n.mat))
 
 	// Assign the new message a sequence number
-	msg.Seq = len(n.log[n.self])		// Assign sequence number
+	msg.Seq = len(n.seqLog[n.self])		// Assign sequence number
 	msg.Vec = n.mat[n.self].copy()		// Include vector time update
 	n.logCausal(n.self, msg)		// Add msg to our log
 	//println(n.self, n.tmpl.Step, "broadcastCausal step", msg.Step,
@@ -27,23 +27,24 @@ func (n *Node) broadcastCausal(msg *Message) {
 
 // Log a peer's message, either our own (just sent)
 // or another node's (received and ready to be delivered).
-func (n *Node) logCausal(peer int, msg *Message) *logEntry {
+func (n *Node) logCausal(peer int, msg *Message) {
 
 	// Update peer's matrix clock and our record of what it saw by msg
 	for i := range n.peer {
 		//println(i, "mat", len(n.mat), "vec", len(msg.Vec))
 		for n.mat[peer][i] < msg.Vec[i] {
-			n.sawCausal(peer, n.log[i][n.mat[peer][i]].msg)
+			n.sawCausal(peer, n.seqLog[i][n.mat[peer][i]])
 			n.mat[peer][i]++
 		}
 	}
 	n.sawCausal(peer, msg)	// msg has been seen by the peer that sent it
 	n.sawCausal(n.self, msg) // and now we've seen the message too
 
-	ent := logEntry{msg, n.saw[peer].copy(0), n.wit[peer].copy(0)}
-	n.log[peer] = append(n.log[peer], &ent)	// record log entry
-	n.mat[n.self][peer] = len(n.log[peer])	// update our vector time
-	return &ent
+	n.seqLog[peer] = append(n.seqLog[peer], msg) // log this msg
+	n.mat[n.self][peer] = len(n.seqLog[peer]) // update our vector time
+	if len(n.seqLog[peer]) != msg.Seq + 1 {  // sanity check
+		panic("out of sync")
+	}
 }
 
 // Record the fact that a given peer is now known to have seen a given message.
@@ -51,7 +52,7 @@ func (n *Node) logCausal(peer int, msg *Message) *logEntry {
 func (n *Node) sawCausal(peer int, msg *Message) {
 	n.saw[peer].add(msg)
 	if msg.Typ == Wit {
-		prop := n.log[msg.From][msg.Prop].msg
+		prop := n.seqLog[msg.From][msg.Prop]
 		if prop.Typ != Prop { panic("not a proposal!") }
 		n.wit[peer].add(prop)
 	}
@@ -115,19 +116,14 @@ func (n *Node) deliverCausal(peer int) bool {
 	//println(n.self, n.tmpl.Step, "enqueueCausal",
 	//	"deliver type", msg.Typ,
 	//	"seq", msg.Seq, "#oom", len(n.oom[i]))
-	if n.oom[peer][0].Seq != len(n.log[peer]) { //  sanity check
-		panic("out of sync")
-	}
-	ent := n.logCausal(peer, n.oom[peer][0])
-	if len(n.log[peer]) != ent.msg.Seq+1 {
-		panic("out of sync")
-	}
+	msg := n.oom[peer][0]
+	n.logCausal(peer, msg)
 
 	// Remove it from this peer's out-of-order message queue.
 	n.oom[peer] = n.oom[peer][1:]
 
 	// Deliver the message to upper layers.
-	n.receiveTLC(ent.msg)
+	n.receiveTLC(msg)
 
 	return true	// made progress
 }
@@ -136,7 +132,7 @@ func (n *Node) deliverCausal(peer int) bool {
 func (n *Node) initCausal() {
 	n.mat = make([]vec, len(n.peer))
 	n.oom = make([][]*Message, len(n.peer))
-	n.log = make([][]*logEntry, len(n.peer))
+	n.seqLog = make([][]*Message, len(n.peer))
 	n.saw = make([]set, len(n.peer))
 	n.wit = make([]set, len(n.peer))
 	for i := range n.peer {

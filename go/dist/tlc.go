@@ -8,6 +8,7 @@ import (
 // Initialize the TLC layer state in a Node
 func (n *Node) initTLC() {
 	n.tmpl = Message{From: n.self, Step: -1}
+	n.stepLog = make([][]logEntry, len(n.peer))
 }
 
 
@@ -42,11 +43,6 @@ func (n *Node) advanceTLC(step int) {
 	n.acks = make(set)	// No acknowledgments received yet in this step
 	n.wits = make(set)	// No threshold witnessed messages received yet
 
-	for i := range n.peer {	// Prune ancient saw and wit set history
-		n.saw[i] = n.saw[i].copy(n.save)
-		n.wit[i] = n.wit[i].copy(n.save)
-	}
-
 	// Notify the upper (QSC) layer of the advancement of time,
 	// and let it fill in its part of the new message to broadcast.
 	n.advanceQSC(n.saw[n.self], n.wit[n.self])
@@ -63,6 +59,19 @@ func (n *Node) receiveTLC(msg *Message) {
 	//	"step", msg.Step, "typ", msg.Typ)
 	switch msg.Typ {
 	case Prop: // A raw unwitnessed proposal broadcast.
+
+		// Record the set of messages this node had seen
+		// by the time it advanced to this new time-step.
+		if len(n.stepLog[msg.From]) != msg.Step {
+			panic("out of sync")
+		}
+		n.stepLog[msg.From] = append(n.stepLog[msg.From],
+				logEntry{n.saw[msg.From], n.wit[msg.From]})
+
+		// Continue from pruned copies in the next time step
+		n.saw[msg.From] = n.saw[msg.From].copy(n.save)
+		n.wit[msg.From] = n.wit[msg.From].copy(n.save)
+
 		if msg.Step == n.tmpl.Step {
 			//println(n.self, n.tmpl.Step, "ack", msg.From)
 			n.acknowledgeTLC(msg)
@@ -81,9 +90,11 @@ func (n *Node) receiveTLC(msg *Message) {
 		}
 
 	case Wit: // A threshold-witnessed message. Collect a threshold of them.
-		prop := n.log[msg.From][msg.Prop].msg
+		prop := n.seqLog[msg.From][msg.Prop]
 		if prop.Typ != Prop { panic("doesn't refer to a proposal!") }
 		if msg.Step == n.tmpl.Step {
+
+			// Collect a threshold of Wit witnessed messages.
 			n.wits.add(prop) // witnessed messages in this step
 			if len(n.wits) >= Threshold {
 
