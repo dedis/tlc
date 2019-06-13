@@ -5,7 +5,6 @@ import (
 )
 
 
-
 // Initialize the TLC layer state in a Node
 func (n *Node) initTLC() {
 	n.tmpl = Message{From: n.self, Step: -1}
@@ -17,7 +16,7 @@ func (n *Node) broadcastTLC() *Message {
 
 	//println(n.self, n.tmpl.Step, "broadcast", msg, "typ", msg.Typ)
 	msg := n.tmpl
-	n.broadcastGossip(&msg)
+	n.broadcastCausal(&msg)
 	return &msg
 }
 
@@ -27,7 +26,7 @@ func (n *Node) acknowledgeTLC(prop *Message) {
 	msg := n.tmpl
 	msg.Typ = Ack
 	msg.Prop = prop.Seq
-	n.sendGossip(prop.From, &msg)
+	n.sendCausal(prop.From, &msg)
 }
 
 // Advance to a new time step.

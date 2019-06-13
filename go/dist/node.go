@@ -77,7 +77,7 @@ func (n *Node) init(self int, peer []peer) {
 	n.self = self
 	n.peer = peer
 
-	n.initGossip()
+	n.initCausal()
 	n.initTLC()
 }
 

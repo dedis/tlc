@@ -508,7 +508,7 @@ func (n *Node) runReceiveNetwork(peer int, dec *gob.Decoder,
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			panic("receiveGossip:" + err.Error())
+			panic("receiveCausal:" + err.Error())
 		}
 		//println(n.self, n.tmpl.Step, "runReceiveNetwork: recv from",
 		//	msg.From, "type", msg.Typ, "seq", msg.Seq,
@@ -532,10 +532,10 @@ func (n *Node) receiveNetwork(msg *Message, grp *sync.WaitGroup) {
 		grp.Done()
 	}()
 
-	// Dispatch up to the gossip layer
+	// Dispatch up to the causal ordering layer
 	//println(n.self, n.tmpl.Step, "receiveNetwork from", msg.From,
 	//	"type", msg.Typ,  "seq", msg.Seq, "vec", len(msg.Vec))
-	n.receiveGossip(msg)
+	n.receiveCausal(msg)
 }
 
 
