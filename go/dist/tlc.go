@@ -5,7 +5,6 @@ import (
 )
 
 
-
 // Initialize the TLC layer state in a Node
 func (n *Node) initTLC() {
 	n.tmpl = Message{From: n.self, Step: -1}

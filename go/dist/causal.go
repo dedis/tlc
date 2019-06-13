@@ -132,6 +132,7 @@ func (n *Node) deliverCausal(peer int) bool {
 	return true	// made progress
 }
 
+// Initialize the causality and higher layer state for a node.
 func (n *Node) initCausal() {
 	n.mat = make([]vec, len(n.peer))
 	n.oom = make([][]*Message, len(n.peer))
