@@ -3,6 +3,8 @@ package failstop
 import (
 	"tlc"
 	"time"
+
+	. "github.com/dedis/tlc/go/stack/arch"
 )
 
 // Trivial internal realtime layer that merely timestamps incoming messages

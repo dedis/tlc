@@ -4,10 +4,7 @@
 package threstime
 
 import (
-	"math/big"
-
-	"tlc"
-	"tlc/arch"
+	. "github.com/dedis/tlc/go/stack/arch"
 )
 
 
@@ -35,153 +32,125 @@ type Layer struct {
 	lower arch.Lower
 	upper arch.Upper
 
-	n, tm int
-	step arch.step
-	msg []arch.Message
-	nmsg int
-
-	view []View
+	tmpl	Message		// Template for messages we send
+	acks	set		// Acknowledgments we've received in this step
+	wits	set		// Threshold witnessed messages seen this step
+	expiry	int		// Earliest step for which we maintain history
+	log	[][]logEntry	// Recent messages seen by nodes at each step
 }
 
-func (l *Layer) Init(stack arch.Stack, lower arch.Lower, upper arch.Upper) {
+// Per-step info each node tracks and logs about all other nodes' histories
+type logEntry struct {
+	saw	set		// All nodes' messages the node had seen by then
+	wit	set		// Threshold witnessed messages it had seen
+}
 
-	n, tm, _ := stack.Dim()
-	l.n = n
-	l.tm = tm
 
+// Initialize the threshold time layer state instance for a node.
+func (l *Layer) Init(stack Stack, lower Lower, upper Upper) {
 	l.stack = stack
 	l.lower = lower
 	l.upper = upper
 
-	// Create the received-messages vector
-	l.msg = make([]arch.Message, n)
-	l.nmsg = 0
-
-	// Launch the protocol by sending our message for timestamp 0.
-	// Would it be useful to split this into a separate Start() function?
-	l.step = 0
-	l.send()
+	l.tmpl = Message{From: n.self, Step: -1}
 }
 
-func (l *Layer) Recv(msg arch.Message) {
 
-	step := msg.Step()
-	if step < l.step {
-		l.stack.Warnf("threstime: dropping obsolete message")
-		return
+// Broadcast a copy of our current message template to all nodes
+func (l *Layer) broadcast() *Message {
+
+	//println(n.self, n.tmpl.Step, "broadcast", msg, "typ", msg.Typ)
+	msg := n.tmpl
+	n.broadcastCausal(&msg)
+	return &msg
+}
+
+// Unicast an acknowledgment of a given proposal to its sender
+func (l *Layer) acknowledge(prop *Message) {
+
+	msg := n.tmpl
+	msg.Typ = Ack
+	msg.Prop = prop.Seq
+	n.sendCausal(prop.From, &msg)
+}
+
+// Advance to a new time step.
+func (l *Layer) advance(step int) {
+	//println(n.self, step, "advanceTLC",
+	//	"saw", len(n.saw[n.self]), "wit", len(n.wit[n.self]))
+
+	// Initialize our message template for new time step
+	n.tmpl.Step = step	// Advance to new time step
+	n.tmpl.Typ = Prop	// Raw unwitnessed proposal message initially
+	n.tmpl.Ticket = rand.Int31n(MaxTicket)	// Choose a ticket
+
+	n.acks = make(set)	// No acknowledgments received yet in this step
+	n.wits = make(set)	// No threshold witnessed messages received yet
+
+	for i := range n.peer {	// Prune ancient saw and wit set history
+		n.saw[i] = n.saw[i].copy(n.save)
+		n.wit[i] = n.wit[i].copy(n.save)
 	}
-	if step > l.step {
-		l.stack.Warnf("threstime: received message out of causal order")
-		// or might this happen if we need to catch up after lagging?
-		return
-	}
 
-	// Record the received message
-	i = msg.Sender()
-	if l.msg[i] != nil {
-		l.stack.Warnf("threstime: duplicate message received")
-		return
-	}
-	l.msg[i] = msg
-	l.nmsg++
+	// Notify the upper (QSC) layer of the advancement of time,
+	// and let it fill in its part of the new message to broadcast.
+	upper.Advance(n.saw[n.self], n.wit[n.self])
 
-	// Pass the received message on up the stack.
-	l.upper.Recv(msg)
+	prop := n.broadcast()		// broadcast our raw proposal
+	n.tmpl.Prop = prop.Seq		// save proposal's sequence number
+	n.acks.add(prop)		// automatically self-acknowledge  it
+}
 
-	// Advance time when we meet the message threshold
-	if (l.nmsg >= l.tm) {
+// Returns the set of broadcast messages that had been seen
+// by a given node by a given recent time-step.
+func (l *Layer) Saw(node Node, step Step) MessageSet {
+}
 
-		// Clear the received-messages record
-		for i := range l.msg {
-			l.msg[i] = nil
+// Returns the set of threshold witnessed proposals
+// seen by a given node by a given recent time-step.
+func (l *Layer) Wit(node Node, step Step) MessageSet {
+}
+
+// The lower layer upcalls this method to notify us of a received message.
+// We rely on the causality layer below to ensure that messages are
+// delivered to this method in causal order.
+func (l *Layer) Receive(msg *Message) {
+
+	// Process this message according to type.
+	//println(n.self, n.tmpl.Step, "receivedTLC from", msg.From,
+	//	"step", msg.Step, "typ", msg.Typ)
+	switch msg.Type {
+	case Prop: // A raw unwitnessed proposal broadcast.
+		if msg.Step == l.tmpl.Step {
+			//println(n.self, n.tmpl.Step, "ack", msg.From)
+			l.acknowledge(msg)
 		}
-		l.nmsg = 0
 
-		// Increment step count and send the next time-step's broadcast
-		l.step++
-		l.send()
-	}
-}
+	case Ack: // An acknowledgment. Collect a threshold of acknowledgments.
+		if msg.Prop == l.tmpl.Prop { // only if it acks our proposal
+			l.acks.add(msg)
+			//println(n.self, n.tmpl.Step,  "got ack", len(n.acks))
+			if l.tmpl.Type == Prop && len(l.acks) >= Threshold {
 
-func (l *Layer) send() {
-	msg := l.upper.Send(l.step)
-	l.lower.Send(msg)
-}
+				// Broadcast a threshold-witnesed certification
+				l.tmpl.Type = Wit
+				l.broadcast()
+			}
+		}
 
+	case Wit: // A threshold-witnessed message. Collect a threshold of them.
+		prop := l.log[msg.From][msg.Prop].msg
+		if prop.Type != Prop { panic("doesn't refer to a proposal!") }
+		if msg.Step == l.tmpl.Step {
+			l.wits.add(prop) // witnessed messages in this step
+			if len(l.wits) >= Threshold {
 
+				// Log the saw and wit sets by time-step.
 
-// A View represents a view of threshold-clocked history history
-// as recorded by a particular node at a particular time-step.
-type View struct {
-	step arch.Step
-	peer int
-	msg arch.Message
-	seen *bitVec
-	witn *bitVec
-}
-
-// Return the time-step number at which this View was established.
-func (v *View) Step() arch.Step  {
-	return v.step
-}
-
-// Return the participant number who established this View.
-func (v *View) Peer() int {
-	return v.peer
-}
-
-// Return the Message that participant broadcast at this time-step.
-func (v *View) Message() arch.Message {
-	return v.msg
-}
-
-// Return the bit-vector of nodes whose messages
-// from the immediately prior time-step were seen in this view.
-// The returned BitVec must not be modified.
-// func (v *View) Seen() *BitVec
-
-// Return true if node i's message from the last time-step is within this view.
-func (v *View) Seen(i int) bool {
-	return v.seen.Bit(i)
-}
-
-// Return the bit-vector of nodes whose messages
-// from the immediately prior time-step were witness cosigned
-// and used in advancing the logical clock to the current time-step.
-// This is always a subset of the nodes returned by Seen().
-// The returned BitVec must not be modified.
-// func (v *View) Witnessed() *BitVec
-
-// Return true if node i's message from the last time-step
-// was threshold-witnessed and used in advancing time tothe current step
-// within this view.
-func (v *View) Witnessed(i  int) bool {
-	return v.witn.Bit(i)
-}
-
-// If the specified prior time-step and node number's message
-// is within the history defined by this View and not obsolete,
-// then returns a View representing that prior event.
-// Otherwise, returns nil.
-// func (v *View) Prior(step arch.Step, node int)
-
-
-
-
-// BitRec represents a bit vector, implemented via math/big.Int.
-type bitVec struct {
-	Int big.Int
-}
-
-func (v *bitVec) Bit(i int) bool {
-	return v.Int.Bit(i) != 0
-}
-
-func (v bitVec) SetBit(i int, b bool) {
-	if b {
-		v.Int.SetBit(&v.Int, i, 1)
-	} else {
-		v.Int.SetBit(&v.Int, i, 0)
+				// We've met the condition to advance time.
+				l.advance(n.tmpl.Step + 1)
+			}
+		}
 	}
 }
 

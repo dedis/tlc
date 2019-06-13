@@ -7,6 +7,8 @@ import (
 	"tlc/gossip"
 	"tlc/vectime"
 	"tlc/log"
+
+	. "github.com/dedis/tlc/go/stack/arch"
 )
 
 

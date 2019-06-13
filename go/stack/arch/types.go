@@ -10,60 +10,35 @@ import (
 	"crypto/rand"
 )
 
-// Step represents a 64-bit logical time-step number produced by TLC.
-type Step uint64
-
-// Seq represents a node-local event sequence number
-type Seq uint64
-
-
-// Vec represents a vector timestamp with a sequence number per participant.
-type Vec []Seq
-
-// Set r to the elementwise maximum of vector clocks a and b.
-// Result r may be the same vector as inputs a or b.
-func (r Vec) Max(a, b Vec) {
-	for i := range r {
-		if a[i] > b[i] {
-			r[i] = a[i]
-		} else {
-			r[i] = b[i]
-		}
-	}
-}
-
-
-// Mat represents a matrix timestamp with a vector per participant.
-type Mat []Vec
-
-
 // Common cross-layer interface to abstract Message objects.
 // XXX move this and message-specific types to 'tlc/protocol' package?
-type Message interface {
+type MessageInterface interface {
 
-	// Returns the participant number of the message's sender.
-	Sender() int
+	// Return the message's uniquely-identifying label,
+	// consisting of originating and destination node number,
+	// time-step number, and node-local sequence number.
+	// The destination is -1 for undirected broadcast messages.
+	GetLabel() (from, dest int, step Step, seq Seq)
 
-	// Returns the TLC logical time-step this message is associated with.
-	Step() Step
-
-	// Returns the message's destination participant number if directed,
-	// or -1 if the message is broadcast (undirected).
-	Dest() int
+	// Set the message's label.
+	SetLabel(from, dest int, step Step, seq Seq)
 
 	// Obtain the wall-clock timestamp the message contains, if any.
 	// Returns a zero time if the message contains no wall-clock timestamp.
-	Time() time.Time
+	GetTime() time.Time
 
 	// Set the message's wall-clock timestamp to a particular time.
 	SetTime(wallclock time.Time)
 
+	// Get the message's vector timestamp.
+	GetVec(vector Vec)
+
 	// Set the message's vector timestamp.
 	SetVec(vector Vec)
 
-	BroadcastMessage() *BroadcastMessage
-	ViewReqMessage() *ViewReqMessage
-	ViewstampMessage() *ViewstampMessage
+	//BroadcastMessage() *BroadcastMessage
+	//ViewReqMessage() *ViewReqMessage
+	//ViewstampMessage() *ViewstampMessage
 }
 
 // A BroadcastMessage represents a node's main TLC broadcast each time-step.
@@ -92,28 +67,28 @@ type ViewstampMessage struct {
 }
 
 // Common systems functionality that a whole TLC protocol stack needs
-type Stack interface {
+//type Stack interface {
 
 	// Return this stack's configuration,
 	// which should never change after the stack's creation.
-	Config() *Config
+//	Config() *Config
 
 	// Return the basic dimension parameters of this TLC configuration
-	Dim() (Tm, Tw, N int)
+//	Dim() (Tm, Tw, N int)
 
 	// Obtain the current time (which may be real or simulated)
-	Now() time.Time
+//	Now() time.Time
 
 	// Request callback to function f as soon as possible after time t
-	At(t time.Time, f func()) Timer
+//	At(t time.Time, f func()) Timer
 
 	// Log a non-fatal warning
-	Warnf(format string, v ...interface{})
+//	Warnf(format string, v ...interface{})
 
 	// Safely call into the TLC stack's single-threaded environment
 	// from an independent goroutine running asynchronously from the stack.
-	Call(f func())
-}
+//	Call(f func())
+//}
 
 type Config struct {
 	N int			// Total number of participating nodes
@@ -153,10 +128,10 @@ func (e Entropy) Read(b []byte) (n int, err error) {
 }
 
 func (e Entropy) Int63() int64 {
-	buf [8]byte
+	var buf [8]byte
 	n, err := io.ReadFull(e, buf[:])
 	if n != 8 || err != nil {
-		panic("error reading random entropy source: " + err.String())
+		panic("error reading random entropy source: " + err.Error())
 	}
 	buf[0] &= 0x7f	// clear bit 63 (the sign bit)
 	return int64(binary.BigEndian.Uint64(buf[:]))
@@ -184,28 +159,28 @@ type Peer interface {
 	// On connection failure, the peering module
 	// will attempt to reconnect automatically with exponential backoff
 	// to limit resource consumption during persistent unreachability.
-	Stream() (rw io.Stream, err error)
+	//Stream() (rw io.Stream, err error)
 
 	// ...
 }
 
 // Generic interface to a lower layer as seen by the immediately higher layer.
-type Lower interface {
+//type Lower interface {
 
 	// Downcall the lower layer to broadcast a message to all participants.
-	Send(msg Message)
+//	Send(msg Message)
 
 	// Signal all lower layers that all information regarding timesteps
 	// before min are now obsolete and may be garbage-collected.
-	Obsolete(min Step)
-}
+//	Obsolete(min Step)
+//}
 
 // Generic interface to a higher layer as seen by the immediately lower layer.
-type Upper interface {
+//type Upper interface {
 
 	// Upcall the upper layer to process a received message.
-	Recv(msg Message)
-}
+//	Recv(msg Message)
+//}
 
 // Basic interface to the minimal Timer functionality the TLC stack needs.
 // This is compatible with, but simpler than, the time.Timer interface
