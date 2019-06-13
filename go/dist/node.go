@@ -42,7 +42,7 @@ type Node struct {
 	// Causal history layer
 	mat	[]vec		// Node's current matrix clock
 	oom	[][]*Message	// Out-of-order messages not yet delivered
-	log	[][]*logEntry	// Nodes' message received and delivered by seq
+	seqLog	[][]*Message	// Nodes' message received and delivered by seq
 	saw	[]set		// Messages each node saw recently
 	wit	[]set		// Witnessed messages each node saw recently
 
@@ -51,6 +51,7 @@ type Node struct {
 	save	int		// Earliest step for which we maintain history
 	acks	set		// Acknowledgments we've received in this step
 	wits	set		// Threshold witnessed messages seen this step
+	stepLog	[][]logEntry	// Nodes' messages seen by start of recent steps
 
 	// This node's record of QSC consensus history
 	choice	[]choice	// Best proposal this node chose each round
@@ -60,9 +61,8 @@ type peer interface {
 	Send(msg *Message)
 }
 
-// Per-sequence info each node tracks and logs about all other nodes' histories
+// Info each node logs about other nodes' views at the start of each time-step
 type logEntry struct {
-	msg	*Message	// Message the node broadcast at this seq
 	saw	set		// All nodes' messages the node had seen by then
 	wit	set		// Threshold witnessed messages it had seen
 }

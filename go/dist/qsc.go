@@ -56,7 +56,7 @@ func (n *Node) spoiledQSC(s int, saw set, prop *Message, ticket int32) bool {
 // Return true if given proposal was doubly confirmed (reconfirmed).
 func (n *Node) reconfirmedQSC(s int, wit set, prop *Message) bool {
 	for p := range wit {	// search for a paparazzi witness at s+1
-		if p.Step == s+1 && n.log[p.From][p.Seq].wit.has(prop) {
+		if p.Step == s+1 && n.stepLog[p.From][s+1].wit.has(prop) {
 			return true
 		}
 	}
