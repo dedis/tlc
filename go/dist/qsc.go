@@ -1,4 +1,4 @@
-package minnet
+package dist
 
 
 // Witnessed QSC requires three TLC time-steps per consensus round.
