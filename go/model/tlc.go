@@ -7,9 +7,9 @@ import (
 // Create a copy of our message template for transmission.
 // Also duplicates the slices within the template that are mutable.
 func (n *Node) copyTemplate() *Message {
-	msg := n.tmpl			// copy the message template
-	msg.saw = msg.saw.copy(0)	// take snapshot of mutable saw set
-	msg.wit = msg.wit.copy(0)	// take snapshot of mutable wit set
+	msg := n.tmpl             // copy the message template
+	msg.saw = msg.saw.copy(0) // take snapshot of mutable saw set
+	msg.wit = msg.wit.copy(0) // take snapshot of mutable wit set
 	return &msg
 }
 
@@ -34,21 +34,21 @@ func (n *Node) acknowledgeTLC(prop *Message) {
 func (n *Node) advanceTLC(step int) {
 
 	// Initialize our message template for new time step
-	n.tmpl.step = step	// Advance to new time step
-	n.tmpl.typ = Prop	// Broadcast raw unwitnessed message initially
-	n.tmpl.prop = nil	// Filled in below on raw proposal broadcast
-	n.tmpl.ticket = rand.Int31n(MaxTicket)	// Choose a ticket
-	n.tmpl.saw = n.tmpl.saw.copy(n.save)	// prune ancient history
+	n.tmpl.step = step                     // Advance to new time step
+	n.tmpl.typ = Prop                      // Broadcast raw proposal first
+	n.tmpl.prop = nil                      // No proposal message yet
+	n.tmpl.ticket = rand.Int31n(MaxTicket) // Choose a ticket
+	n.tmpl.saw = n.tmpl.saw.copy(n.save)   // prune ancient history
 	n.tmpl.wit = n.tmpl.wit.copy(n.save)
 
-	n.acks = make(set)	// No acknowledgments received yet in this step
-	n.wits = make(set)	// No threshold witnessed messages received yet
+	n.acks = make(set) // No acknowledgments received yet in this step
+	n.wits = make(set) // No threshold witnessed messages received yet
 
 	// Notify the upper (QSC) layer of the advancement of time,
 	// and let it fill in its part of the new message to broadcast.
 	n.advanceQSC(n.tmpl.saw, n.tmpl.wit)
 
-	n.tmpl.prop = n.broadcastTLC()	// broadcast our raw proposal
+	n.tmpl.prop = n.broadcastTLC() // broadcast our raw proposal
 }
 
 // The network layer below calls this on receipt of a message from another node.
@@ -57,14 +57,16 @@ func (n *Node) receiveTLC(msg *Message) {
 	// Process broadcast messages in causal order and only once each,
 	// ignoring messages already processed or before recorded history.
 	// This will catch us up at least to the same step as msg.
-	if n.tmpl.saw.has(msg) || msg.step < n.save { return }
+	if n.tmpl.saw.has(msg) || msg.step < n.save {
+		return
+	}
 	for prior := range msg.saw {
 		n.receiveTLC(prior) // First process causally prior messages
 	}
 	if n.tmpl.saw.has(msg) || msg.step < n.save {
-		return		// discard messages already seen or obsolete
+		return // discard messages already seen or obsolete
 	}
-	n.tmpl.saw.add(msg)	// record that we've seen this message
+	n.tmpl.saw.add(msg) // record that we've seen this message
 
 	// Now process this message according to type.
 	switch msg.typ {
@@ -92,4 +94,3 @@ func (n *Node) receiveTLC(msg *Message) {
 		}
 	}
 }
-
