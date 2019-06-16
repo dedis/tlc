@@ -4,7 +4,7 @@ package arch
 type Node int
 
 // Step represents a 64-bit logical time-step number produced by TLC.
-type Step uint64
+type Step int64
 
 type Type int			// Type of message
 const (
@@ -40,7 +40,7 @@ type Message struct {
 	// Threshold time (TLC) layer
 	Step	Step		// Logical time step this message is for
 	Type	Type		// Message type
-	Prop	Node		// Proposal Seq this Ack or Wit is about
+	Prop	Seq		// Proposal Seq this Ack or Wit is about
 	Ticket	Ticket		// Genetic fitness ticket for this proposal
 }
 

@@ -2,7 +2,7 @@ package arch
 
 
 // Seq represents a node-local event sequence number.
-type Seq uint64
+type Seq int64
 
 // Vec represents a vector timestamp with a sequence number per node.
 type Vec []Seq

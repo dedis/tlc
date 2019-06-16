@@ -4,12 +4,26 @@
 package threstime
 
 import (
+	"math/rand"
+
 	. "github.com/dedis/tlc/go/stack/arch"
 )
 
 
+type Stack interface {
+	Self() Node
+}
+
 type Lower interface {
-	Send(msg arch.Message)
+
+	// Broadcast a message to all participating nodes.
+	Broadcast(msg *Message)
+
+	// Unicast a message to participant dest.
+	Send(dest Node, msg *Message)
+
+	// Return the message a given peer sent with a given sequence number.
+	Message(peer Node, seq Seq) *Message
 }
 
 type Upper interface {
@@ -20,29 +34,29 @@ type Upper interface {
 	// sends become upcalls rather than downcalls
 	// because their timing is driven by TLC
 	// and, in turn, network communication.
-	Step(step arch.Step) arch.Message
+	Advance(step Step) (expire Step)
 
 	// Deliver a (suitably witnessed) message newly-received from a peer.
-	Recv(msg arch.Message)
+//	Recv(msg arch.Message)
 }
 
-
+// Per-node state for the threshold time layer.
 type Layer struct {
-	stack arch.Stack
-	lower arch.Lower
-	upper arch.Upper
+	stack	Stack
+	lower	Lower
+	upper	Upper
 
 	tmpl	Message		// Template for messages we send
-	acks	set		// Acknowledgments we've received in this step
-	wits	set		// Threshold witnessed messages seen this step
-	expiry	int		// Earliest step for which we maintain history
+	acks	MessageSet	// Acknowledgments we've received in this step
+	wits	MessageSet	// Threshold witnessed messages seen this step
+	expiry	Step		// Earliest step for which we maintain history
 	log	[][]logEntry	// Recent messages seen by nodes at each step
 }
 
 // Per-step info each node tracks and logs about all other nodes' histories
 type logEntry struct {
-	saw	set		// All nodes' messages the node had seen by then
-	wit	set		// Threshold witnessed messages it had seen
+	saw	MessageSet	// All nodes' messages the node had seen by then
+	wit	MessageSet	// Threshold witnessed messages it had seen
 }
 
 
@@ -52,7 +66,7 @@ func (l *Layer) Init(stack Stack, lower Lower, upper Upper) {
 	l.lower = lower
 	l.upper = upper
 
-	l.tmpl = Message{From: n.self, Step: -1}
+	l.tmpl = Message{From: stack.Self(), Step: -1}
 }
 
 
@@ -60,41 +74,45 @@ func (l *Layer) Init(stack Stack, lower Lower, upper Upper) {
 func (l *Layer) broadcast() *Message {
 
 	//println(n.self, n.tmpl.Step, "broadcast", msg, "typ", msg.Typ)
-	msg := n.tmpl
-	n.broadcastCausal(&msg)
+	msg := l.tmpl
+	l.lower.Broadcast(&msg)
 	return &msg
 }
 
 // Unicast an acknowledgment of a given proposal to its sender
 func (l *Layer) acknowledge(prop *Message) {
 
-	msg := n.tmpl
-	msg.Typ = Ack
+	msg := l.tmpl
+	msg.Type = Ack
 	msg.Prop = prop.Seq
-	n.sendCausal(prop.From, &msg)
+	l.lower.Send(prop.From, &msg)
 }
 
+
+var maxTicket int32 = 1000000	// XXX Amount of entropy in lottery tickets
+
 // Advance to a new time step.
-func (l *Layer) advance(step int) {
+func (l *Layer) advance(step Step) {
 	//println(n.self, step, "advanceTLC",
 	//	"saw", len(n.saw[n.self]), "wit", len(n.wit[n.self]))
 
 	// Initialize our message template for new time step
-	n.tmpl.Step = step	// Advance to new time step
-	n.tmpl.Typ = Prop	// Raw unwitnessed proposal message initially
-	n.tmpl.Ticket = rand.Int31n(MaxTicket)	// Choose a ticket
+	l.tmpl.Step = step	// Advance to new time step
+	l.tmpl.Type = Prop	// Raw unwitnessed proposal message initially
+	l.tmpl.Ticket = Ticket(rand.Int31n(maxTicket))	// Choose a ticket
 
-	n.acks = make(set)	// No acknowledgments received yet in this step
-	n.wits = make(set)	// No threshold witnessed messages received yet
-
-	for i := range n.peer {	// Prune ancient saw and wit set history
-		n.saw[i] = n.saw[i].copy(n.save)
-		n.wit[i] = n.wit[i].copy(n.save)
-	}
+	l.acks = make(MessageSet) // No acknowledgments received yet this step
+	l.wits = make(MessageSet) // No witnessed messages received yet
 
 	// Notify the upper (QSC) layer of the advancement of time,
 	// and let it fill in its part of the new message to broadcast.
-	upper.Advance(n.saw[n.self], n.wit[n.self])
+	newExp := l.upper.Advance(step)
+
+	// Gradually garbage-collect old expired log entries.
+	for l.expiry < newExp {
+		l.log[0] = logEntry{nil, nil}
+		l.log = l.log[1:]
+	}
 
 	prop := n.broadcast()		// broadcast our raw proposal
 	n.tmpl.Prop = prop.Seq		// save proposal's sequence number
@@ -104,29 +122,54 @@ func (l *Layer) advance(step int) {
 // Returns the set of broadcast messages that had been seen
 // by a given node by a given recent time-step.
 func (l *Layer) Saw(node Node, step Step) MessageSet {
+	return l.log[node][step - l.expiry].saw
 }
 
 // Returns the set of threshold witnessed proposals
 // seen by a given node by a given recent time-step.
 func (l *Layer) Wit(node Node, step Step) MessageSet {
+	return l.log[node][step - l.expiry].wit
 }
 
 // The lower layer upcalls this method to notify us of a received message.
 // We rely on the causality layer below to ensure that messages are
 // delivered to this method in causal order.
-func (l *Layer) Receive(msg *Message) {
+func (l *Layer) Receive(msg *Message, saw MessageSet) {
 
 	// Process this message according to type.
 	//println(n.self, n.tmpl.Step, "receivedTLC from", msg.From,
 	//	"step", msg.Step, "typ", msg.Typ)
 	switch msg.Type {
 	case Prop: // A raw unwitnessed proposal broadcast.
+
+		// Construct the set of threshold witnessed proposals
+		// seen by the proposal's sender in its recent history.
+		wit := make(MessageSet, len(saw))
+		for m := range saw {
+			if m.Type == Wit {
+				prop := lower.Message(msg.From, msg.Prop)
+				if prop.Type != Prop {
+					panic("doesn't refer to a proposal!")
+				}
+				wit.Add(prop)
+			}
+		}
+
+		// Record the set of [witnessed] messages this node had seen
+		// by the time it advanced to this new time-step.
+		if len(l.log[msg.From]) != msg.Step - l.expiry {
+			panic("out of sync")
+		}
+		l.log[msg.From] = append(l.log[msg.From], logEntry{saw, wit})
+
+		// If the proposal is in our current time step, acknowledge it.
 		if msg.Step == l.tmpl.Step {
 			//println(n.self, n.tmpl.Step, "ack", msg.From)
 			l.acknowledge(msg)
 		}
 
 	case Ack: // An acknowledgment. Collect a threshold of acknowledgments.
+
 		if msg.Prop == l.tmpl.Prop { // only if it acks our proposal
 			l.acks.add(msg)
 			//println(n.self, n.tmpl.Step,  "got ack", len(n.acks))
@@ -139,13 +182,14 @@ func (l *Layer) Receive(msg *Message) {
 		}
 
 	case Wit: // A threshold-witnessed message. Collect a threshold of them.
-		prop := l.log[msg.From][msg.Prop].msg
+
+		prop := lower.Message(msg.From, msg.Prop)
 		if prop.Type != Prop { panic("doesn't refer to a proposal!") }
+		// XXX don't panic; validate properly
+
 		if msg.Step == l.tmpl.Step {
 			l.wits.add(prop) // witnessed messages in this step
 			if len(l.wits) >= Threshold {
-
-				// Log the saw and wit sets by time-step.
 
 				// We've met the condition to advance time.
 				l.advance(n.tmpl.Step + 1)
