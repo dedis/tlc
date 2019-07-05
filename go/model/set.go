@@ -14,14 +14,3 @@ func (s set) add(msg *Message) {
 	s[msg] = struct{}{}
 }
 
-// Return a copy of message set s,
-// dropping any messages before earliest.
-func (s set) copy(earliest int) set {
-	n := make(set)
-	for k, v := range s {
-		if k.step >= earliest {
-			n[k] = v
-		}
-	}
-	return n
-}
