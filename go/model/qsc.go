@@ -46,19 +46,23 @@ func (n *Node) advanceQSC() {
 	bestSpoiler := Best{from: n.from,
 			    pri: n.tkt * len(All) + n.from}
 	if len(n.qsc) != n.step+3 { panic("XXX") }
-	n.qsc = append(n.qsc, Round{ spoil: bestSpoiler })
+	n.qsc = append(n.qsc, Round{spoil: bestSpoiler})
 
 	// Decide if the just-completed consensus round successfully committed.
 	r := &n.qsc[n.step]
 	committed := (r.conf.from == r.reconf.from) &&
 		     (r.conf.from == r.spoil.from)
-	//println(n.from, n.step, "conf", r.conf.from,
-	//		"reconf", r.reconf.from,
-	//		"spoil", r.spoil.from)
+	//println(n.from, n.step, "conf", r.conf.from, r.conf.pri / len(All),
+	//		"reconf", r.reconf.from, r.reconf.pri / len(All),
+	//		"spoil", r.spoil.from, r.spoil.pri / len(All))
 
 	// Record the consensus results for this round (from s to s+3).
+	if len(n.choice) != n.step { panic("XXX") }
+	if len(n.commit) != n.step { panic("XXX") }
 	n.choice = append(n.choice, r.conf.from)
 	n.commit = append(n.commit, committed)
+
+	if n.choice[n.step] != n.qsc[n.step].conf.from { panic("XXX") }
 }
 
 // TLC layer upcalls this to inform us that our proposal is threshold witnessed
@@ -67,7 +71,7 @@ func (n *Node) witnessedQSC() {
 	// Our proposal is now confirmed in the consensus round just starting
 	// Find best confirmed proposal, breaking ties in favor of lower node
 	bestConfirmed := Best{from: n.from,
-			      pri: (n.tkt + 1) * len(All) - n.from}
+			      pri: (n.tkt + 1) * len(All) - 1 - n.from}
 	n.qsc[n.step+3].conf.merge(&bestConfirmed)
 
 	// Find reconfirmed proposals for the consensus round that's in step 1

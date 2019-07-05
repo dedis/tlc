@@ -44,21 +44,31 @@ func (n *Node) advanceTLC(step int) {
 // The network layer below calls this on receipt of a message from another node.
 func (n *Node) receiveTLC(msg *Message) {
 
-	if msg.step > n.step {	// msg is ahead: virally catch up to it
+	for msg.step > n.step {	// msg is ahead: virally catch up to it
 		if len(n.qsc) != n.step+3+1 { panic("XXX") }
-		for msg.step > n.step {
-			n.advanceTLC(n.step + 1)
-		}
+		n.advanceTLC(n.step + 1)
 	}
 	if msg.step + 3 <= n.step {	// msg is too far behind to be useful
 		return
 	}
 
 	// Merge in received QSC state for rounds still in our pipeline
-	mergeQSC(n.qsc[n.step:], msg.qsc[n.step:])
+	//mergeQSC(n.qsc[n.step:], msg.qsc[n.step:])
 
 	// Now process this message according to type, but only in same step.
 	if msg.step == n.step {
+		n.qsc[n.step+3].spoil.merge(&msg.qsc[n.step+3].spoil)
+		n.qsc[n.step+3].conf.merge(&msg.qsc[n.step+3].conf)
+		//n.qsc[n.step+3].reconf.merge(&msg.qsc[n.step+3].reconf)
+
+		n.qsc[n.step+2].spoil.merge(&msg.qsc[n.step+2].spoil)
+		n.qsc[n.step+2].conf.merge(&msg.qsc[n.step+2].conf)
+		n.qsc[n.step+2].reconf.merge(&msg.qsc[n.step+2].reconf)
+
+		n.qsc[n.step+1].spoil.merge(&msg.qsc[n.step+1].spoil)
+		n.qsc[n.step+1].conf.merge(&msg.qsc[n.step+1].conf)
+		n.qsc[n.step+1].reconf.merge(&msg.qsc[n.step+1].reconf)
+
 		switch msg.typ {
 		case Raw: // A raw unwitnessed proposal broadcast.
 			n.acknowledgeTLC(msg)

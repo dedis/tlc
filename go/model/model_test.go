@@ -31,16 +31,30 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 	})
 }
 
+// Dump the consensus state of node n in round s
+func (n *Node) testDump(t *testing.T, s int) {
+	t.Errorf("%v %v conf %v (%v) reconf %v (%v) spoil %v (%v)", n.from, s,
+		n.qsc[s].conf.from, n.qsc[s].conf.pri / len(All),
+		n.qsc[s].reconf.from, n.qsc[s].reconf.pri / len(All),
+		n.qsc[s].spoil.from, n.qsc[s].spoil.pri / len(All))
+}
+
 // Globally sanity-check and summarize each node's observed results.
 func testResults(t *testing.T) {
 	for i, n := range All {
 		commits := 0
+		if n.from != i { panic("XXX") }
 		for s, committed := range n.commit {
+			if n.choice[s] != n.qsc[s].conf.from { panic("XXX") }
 			if committed {
 				commits++
 				for _, nn := range All { // verify consensus
 					if nn.choice[s] != n.choice[s] {
-						t.Errorf("safety violation!")
+						t.Errorf("%v %v UNSAFE COMMIT",
+							i, s)
+						for _, nnn := range All {
+							nnn.testDump(t, s)
+						}
 					}
 				}
 			}
