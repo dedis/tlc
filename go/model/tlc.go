@@ -3,7 +3,7 @@ package model
 // Create a copy of our message template for transmission.
 // Also duplicates the slices within the template that are mutable.
 func (n *Node) newMsg() *Message {
-	msg := n.Message             // copy the message template
+	msg := n.Message                      // copy the message template
 	msg.qsc = append([]Round{}, n.qsc...) // copy QSC state slice
 	return &msg
 }
@@ -16,22 +16,14 @@ func (n *Node) broadcastTLC() {
 	}
 }
 
-// Unicast an acknowledgment of a given proposal to its sender
-func (n *Node) acknowledgeTLC(prop *Message) {
-	msg := n.newMsg()
-	msg.typ = Ack
-	All[prop.from].comm <- msg
-}
-
 // Advance to a new time step.
 func (n *Node) advanceTLC(step int) {
 
 	// Initialize message template with a proposal for the new time step
-	n.step = step                     // Advance to new time step
-	n.typ = Raw                       // Broadcast raw proposal first
-
-	n.acks = make(set) // No acknowledgments received yet in this step
-	n.wits = make(set) // No threshold witnessed messages received yet
+	n.step = step // Advance to new time step
+	n.typ = Raw   // Broadcast raw proposal first
+	n.acks = 0    // No acknowledgments received yet in this step
+	n.wits = 0    // No threshold witnessed messages received yet
 
 	// Notify the upper (QSC) layer of the advancement of time,
 	// and let it fill in its part of the new message to broadcast.
@@ -43,36 +35,34 @@ func (n *Node) advanceTLC(step int) {
 // The network layer below calls this on receipt of a message from another node.
 func (n *Node) receiveTLC(msg *Message) {
 
-	for msg.step > n.step {	// msg is ahead: virally catch up to it
-		if len(n.qsc) != n.step+3+1 { panic("XXX") }
+	for msg.step > n.step { // msg is ahead: virally catch up to it
 		n.advanceTLC(n.step + 1)
-	}
-	if msg.step + 3 <= n.step {	// msg is too far behind to be useful
-		return
 	}
 
 	// Merge in received QSC state for rounds still in our pipeline
-	mergeQSC(n.qsc[n.step+1:], msg.qsc[n.step+1:])
+	if msg.step+3 > n.step {
+		mergeQSC(n.qsc[n.step+1:], msg.qsc[n.step+1:])
+	}
 
 	// Now process this message according to type, but only in same step.
 	if msg.step == n.step {
 		switch msg.typ {
-		case Raw: // A raw unwitnessed proposal broadcast.
-			n.acknowledgeTLC(msg)
+		case Raw: // Acknowledge unwitnessed proposals.
+			ack := n.newMsg()
+			ack.typ = Ack
+			All[msg.from].comm <- ack
 
 		case Ack: // Collect a threshold of acknowledgments.
-			if n.acks.has(msg) { panic("XXX") }
-			n.acks.add(msg)
-			if n.typ == Raw && len(n.acks) >= Threshold {
+			n.acks++
+			if n.typ == Raw && n.acks >= Threshold {
 				n.typ = Wit // Prop now threshold witnessed
 				n.witnessedQSC()
 				n.broadcastTLC()
 			}
 
 		case Wit: // Collect a threshold of threshold witnessed messages
-			if n.wits.has(msg) { panic("XXX") }
-			n.wits.add(msg) // witnessed messages in this step
-			if len(n.wits) >= Threshold {
+			n.wits++ // witnessed messages in this step
+			if n.wits >= Threshold {
 				n.advanceTLC(n.step + 1) // tick the clock
 			}
 		}

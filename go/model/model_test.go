@@ -32,31 +32,28 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 }
 
 // Dump the consensus state of node n in round s
-func (n *Node) testDump(t *testing.T, s int) {
-	r := &n.qsc[s]
-	t.Errorf("%v %v conf %v %v %v reconf %v %v %v spoil %v %v %v",
-		n.from, s,
-		r.conf.from, r.conf.tkt / len(All), r.conf.tkt % len(All),
-		r.reconf.from, r.reconf.tkt / len(All), r.reconf.tkt % len(All),
-		r.spoil.from, r.spoil.tkt / len(All), r.spoil.tkt % len(All))
-}
+//func (n *Node) testDump(t *testing.T, s int) {
+//	r := &n.qsc[s]
+//	t.Errorf("%v %v conf %v %v %v reconf %v %v %v spoil %v %v %v",
+//		n.from, s,
+//		r.conf.from, r.conf.tkt/len(All), r.conf.tkt%len(All),
+//		r.reconf.from, r.reconf.tkt/len(All), r.reconf.tkt%len(All),
+//		r.spoil.from, r.spoil.tkt/len(All), r.spoil.tkt%len(All))
+//}
 
 // Globally sanity-check and summarize each node's observed results.
 func testResults(t *testing.T) {
 	for i, n := range All {
 		commits := 0
-		if n.from != i { panic("XXX") }
 		for s, committed := range n.commit {
-			if n.choice[s] != n.qsc[s].conf.from { panic("XXX") }
 			if committed {
 				commits++
 				for _, nn := range All { // verify consensus
 					if nn.choice[s] != n.choice[s] {
-						t.Errorf("%v %v UNSAFE COMMIT",
-							i, s)
-						for _, nnn := range All {
-							nnn.testDump(t, s)
-						}
+						t.Errorf("%v %v UNSAFE", i, s)
+						//for _, nnn := range All {
+						//	nnn.testDump(t, s)
+						//}
 					}
 				}
 			}
@@ -72,10 +69,10 @@ func TestQSC(t *testing.T) {
 	testRun(t, 2, 2, 10000, 0) // Another trivial case: 2 of 2
 
 	testRun(t, 2, 3, 10000, 0) // Standard f=1 case
-	testRun(t, 3, 5, 10000, 0)  // Standard f=2 case
+	testRun(t, 3, 5, 10000, 0) // Standard f=2 case
 	testRun(t, 4, 7, 1000, 0)  // Standard f=3 case
 	testRun(t, 5, 9, 1000, 0)  // Standard f=4 case
-	testRun(t, 11, 21, 100, 0)  // Standard f=10 case
+	testRun(t, 11, 21, 100, 0) // Standard f=10 case
 
 	testRun(t, 3, 3, 10000, 0) // Larger-than-minimum thresholds
 	testRun(t, 6, 7, 1000, 0)
