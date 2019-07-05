@@ -20,7 +20,6 @@ func (n *Node) broadcastTLC() {
 func (n *Node) acknowledgeTLC(prop *Message) {
 	msg := n.newMsg()
 	msg.typ = Ack
-	msg.prop = prop.from // XXX
 	All[prop.from].comm <- msg
 }
 
@@ -53,28 +52,15 @@ func (n *Node) receiveTLC(msg *Message) {
 	}
 
 	// Merge in received QSC state for rounds still in our pipeline
-	//mergeQSC(n.qsc[n.step:], msg.qsc[n.step:])
+	mergeQSC(n.qsc[n.step+1:], msg.qsc[n.step+1:])
 
 	// Now process this message according to type, but only in same step.
 	if msg.step == n.step {
-		n.qsc[n.step+3].spoil.merge(&msg.qsc[n.step+3].spoil)
-		n.qsc[n.step+3].conf.merge(&msg.qsc[n.step+3].conf)
-		//n.qsc[n.step+3].reconf.merge(&msg.qsc[n.step+3].reconf)
-
-		n.qsc[n.step+2].spoil.merge(&msg.qsc[n.step+2].spoil)
-		n.qsc[n.step+2].conf.merge(&msg.qsc[n.step+2].conf)
-		n.qsc[n.step+2].reconf.merge(&msg.qsc[n.step+2].reconf)
-
-		n.qsc[n.step+1].spoil.merge(&msg.qsc[n.step+1].spoil)
-		n.qsc[n.step+1].conf.merge(&msg.qsc[n.step+1].conf)
-		n.qsc[n.step+1].reconf.merge(&msg.qsc[n.step+1].reconf)
-
 		switch msg.typ {
 		case Raw: // A raw unwitnessed proposal broadcast.
 			n.acknowledgeTLC(msg)
 
 		case Ack: // Collect a threshold of acknowledgments.
-			if msg.prop != n.from { panic("XXX") }
 			if n.acks.has(msg) { panic("XXX") }
 			n.acks.add(msg)
 			if n.typ == Raw && len(n.acks) >= Threshold {

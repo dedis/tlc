@@ -8,14 +8,16 @@ import (
 // or a best potential spoiler competing with the best confirmed proposal.
 type Best struct {
 	from	int	// Node: i for best confirmed, n-i for best spoiler
-	pri	int	// Priority based tkt & from (spoiler) or -from (conf)
+	tkt	int	// Priority based tkt & from (spoiler) or -from (conf)
 }
 
 // Find the Best of two records primarily according to highest ticket number,
 // and secondarily according to highest from node number.
-func (b *Best) merge(o *Best) {
-	if (o.pri > b.pri) {
-		*b = *o
+func (b *Best) merge(o *Best, spoiler bool) {
+	if o.tkt > b.tkt {
+		*b = *o		// strictly better ticket
+	} else if o.tkt == b.tkt && o.from != b.from && spoiler {
+		b.from = -1	// record ticket collision
 	}
 }
 
@@ -26,11 +28,12 @@ type Round struct {
 	reconf	Best	// Best reconfirmed proposal we've found so far
 }
 
+// Merge QSC round info from an incoming message into our round history
 func mergeQSC(b, o []Round) {
 	for i := range o {
-		b[i].spoil.merge(&o[i].spoil)
-		b[i].conf.merge(&o[i].conf)
-		b[i].reconf.merge(&o[i].reconf)
+		b[i].spoil.merge(&o[i].spoil, true)
+		b[i].conf.merge(&o[i].conf, false)
+		b[i].reconf.merge(&o[i].reconf, false)
 	}
 }
 
@@ -43,18 +46,17 @@ func (n *Node) advanceQSC() {
 
 	// Initialize consensus state for the round starting at step.
 	// Find best spoiler, breaking ticket ties in favor of higher node
-	bestSpoiler := Best{from: n.from,
-			    pri: n.tkt * len(All) + n.from}
+	bestSpoiler := Best{from: n.from, tkt: n.tkt}
 	if len(n.qsc) != n.step+3 { panic("XXX") }
 	n.qsc = append(n.qsc, Round{spoil: bestSpoiler})
 
 	// Decide if the just-completed consensus round successfully committed.
 	r := &n.qsc[n.step]
-	committed := (r.conf.from == r.reconf.from) &&
-		     (r.conf.from == r.spoil.from)
-	//println(n.from, n.step, "conf", r.conf.from, r.conf.pri / len(All),
-	//		"reconf", r.reconf.from, r.reconf.pri / len(All),
-	//		"spoil", r.spoil.from, r.spoil.pri / len(All))
+	committed := r.conf.from == r.reconf.from &&
+		     r.conf.from == r.spoil.from
+	//println(n.from, n.step, "conf", r.conf.from, r.conf.tkt / len(All),
+	//		"reconf", r.reconf.from, r.reconf.tkt / len(All),
+	//		"spoil", r.spoil.from, r.spoil.tkt / len(All))
 
 	// Record the consensus results for this round (from s to s+3).
 	if len(n.choice) != n.step { panic("XXX") }
@@ -70,11 +72,10 @@ func (n *Node) witnessedQSC() {
 
 	// Our proposal is now confirmed in the consensus round just starting
 	// Find best confirmed proposal, breaking ties in favor of lower node
-	bestConfirmed := Best{from: n.from,
-			      pri: (n.tkt + 1) * len(All) - 1 - n.from}
-	n.qsc[n.step+3].conf.merge(&bestConfirmed)
+	bestConfirmed := Best{from: n.from, tkt: n.tkt}
+	n.qsc[n.step+3].conf.merge(&bestConfirmed, false)
 
 	// Find reconfirmed proposals for the consensus round that's in step 1
-	n.qsc[n.step+2].reconf.merge(&n.qsc[n.step+2].conf)
+	n.qsc[n.step+2].reconf.merge(&n.qsc[n.step+2].conf, false)
 }
 

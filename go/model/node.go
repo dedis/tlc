@@ -17,7 +17,6 @@ type Message struct {
 	from   int      // Which node sent this message
 	step   int      // Logical time step this message is for
 	typ    Type     // Message type: Prop, Ack, or Wit
-	prop   int      // Node whose proposal this Ack or Wit is about
 	tkt    int	// Genetic fitness ticket for consensus
 	qsc    []Round	// qsc[s] is consensus state for round ending at step s
 }
@@ -36,7 +35,6 @@ type Node struct {
 func newNode(self int) (n *Node) {
 	n = &Node{}
 	n.from = self
-	n.prop = self
 	n.qsc = make([]Round, 3) // for fake "rounds" ending in steps 0-2
 	n.comm = make(chan *Message, 3*len(All)*MaxSteps)
 	n.done = make(chan struct{})
