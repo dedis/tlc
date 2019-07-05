@@ -26,8 +26,6 @@ type Node struct {
 	comm    chan *Message // Channel to send messages to this node
 	acks    int           // # acknowledgments we've received in this step
 	wits    int           // # threshold witnessed messages seen this step
-	choice  []int         // Best proposal this node chose each round
-	commit  []bool        // Whether we observed successful commitment
 	done    chan struct{} // Run signals this when a node terminates
 }
 

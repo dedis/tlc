@@ -10,12 +10,12 @@ import (
 // Best is a record representing either a best confirmed proposal,
 // or a best potential spoiler competing with the best confirmed proposal.
 type Best struct {
-	from int // Node: i for best confirmed, n-i for best spoiler
-	tkt  int // Priority based tkt & from (spoiler) or -from (conf)
+	from int // Node the proposal is from (spoiler: -1 for tied tickets)
+	tkt  int // Proposal's genetic fitness ticket
 }
 
-// Find the Best of two records primarily according to highest ticket number,
-// and secondarily according to highest from node number.
+// Find the Best of two records primarily according to highest ticket number.
+// For spoilers, detect and record ticket collisions with invalid node number.
 func (b *Best) merge(o *Best, spoiler bool) {
 	if o.tkt > b.tkt {
 		*b = *o // strictly better ticket
@@ -26,9 +26,10 @@ func (b *Best) merge(o *Best, spoiler bool) {
 
 // Causally-combined QSC summary information for one consensus round
 type Round struct {
-	spoil  Best // Best potential spoiler we've found so far
+	spoil  Best // Best potential spoiler(s) we've found so far
 	conf   Best // Best confirmed proposal we've found so far
 	reconf Best // Best reconfirmed proposal we've found so far
+	commit bool // Whether we confirm this round successfully committed
 }
 
 // Merge QSC round info from an incoming message into our round history
@@ -53,12 +54,7 @@ func (n *Node) advanceQSC() {
 
 	// Decide if the just-completed consensus round successfully committed.
 	r := &n.qsc[n.step]
-	committed := r.conf.from == r.reconf.from &&
-		r.conf.from == r.spoil.from
-
-	// Record the consensus results for this round (from s to s+3).
-	n.choice = append(n.choice, r.conf.from)
-	n.commit = append(n.commit, committed)
+	r.commit = r.conf.from == r.reconf.from && r.conf.from == r.spoil.from
 }
 
 // TLC layer upcalls this to inform us that our proposal is threshold witnessed
