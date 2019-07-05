@@ -23,8 +23,8 @@ type Message struct {
 }
 
 type Node struct {
+	Message       	     // Template for messages we send
 	comm   chan *Message // Channel to send messages to this node
-	msg    Message       // Template for messages we send
 	save   int           // Earliest step for which we maintain history
 	acks   set           // Acknowledgments we've received in this step
 	wits   set           // Threshold witnessed messages seen this step
@@ -35,10 +35,10 @@ type Node struct {
 
 func newNode(self int) (n *Node) {
 	n = &Node{}
+	n.from = self
+	n.prop = self
+	n.qsc = make([]Round, 3) // for fake "rounds" ending in steps 0-2
 	n.comm = make(chan *Message, 3*len(All)*MaxSteps)
-	n.msg.from = self
-	n.msg.prop = self
-	n.msg.qsc = make([]Round, 3) // for fake "rounds" ending in steps 0-2
 	n.done = make(chan struct{})
 	return
 }
@@ -46,7 +46,7 @@ func newNode(self int) (n *Node) {
 func (n *Node) run() {
 	n.advanceTLC(0) // broadcast message for initial time step
 
-	for MaxSteps == 0 || n.msg.step < MaxSteps {
+	for MaxSteps == 0 || n.step < MaxSteps {
 		msg := <-n.comm   // Receive a message
 		n.receiveTLC(msg) // Process it
 	}
