@@ -4,13 +4,11 @@ import (
 	"math/rand"
 )
 
-
 // Initialize the TLC layer state in a Node
 func (n *Node) initTLC() {
 	n.tmpl = Message{From: n.self, Step: -1}
 	n.stepLog = make([][]logEntry, len(n.peer))
 }
-
 
 // Broadcast a copy of our current message template to all nodes
 func (n *Node) broadcastTLC() *Message {
@@ -36,20 +34,20 @@ func (n *Node) advanceTLC(step int) {
 	//	"saw", len(n.saw[n.self]), "wit", len(n.wit[n.self]))
 
 	// Initialize our message template for new time step
-	n.tmpl.Step = step	// Advance to new time step
-	n.tmpl.Typ = Prop	// Raw unwitnessed proposal message initially
-	n.tmpl.Ticket = rand.Int31n(MaxTicket)	// Choose a ticket
+	n.tmpl.Step = step                     // Advance to new time step
+	n.tmpl.Typ = Prop                      // Raw unwitnessed proposal message initially
+	n.tmpl.Ticket = rand.Int31n(MaxTicket) // Choose a ticket
 
-	n.acks = make(set)	// No acknowledgments received yet in this step
-	n.wits = make(set)	// No threshold witnessed messages received yet
+	n.acks = make(set) // No acknowledgments received yet in this step
+	n.wits = make(set) // No threshold witnessed messages received yet
 
 	// Notify the upper (QSC) layer of the advancement of time,
 	// and let it fill in its part of the new message to broadcast.
 	n.advanceQSC(n.saw[n.self], n.wit[n.self])
 
-	prop := n.broadcastTLC()	// broadcast our raw proposal
-	n.tmpl.Prop = prop.Seq		// save proposal's sequence number
-	n.acks.add(prop)		// automatically self-acknowledge  it
+	prop := n.broadcastTLC() // broadcast our raw proposal
+	n.tmpl.Prop = prop.Seq   // save proposal's sequence number
+	n.acks.add(prop)         // automatically self-acknowledge  it
 }
 
 func (n *Node) receiveTLC(msg *Message) {
@@ -66,7 +64,7 @@ func (n *Node) receiveTLC(msg *Message) {
 			panic("out of sync")
 		}
 		n.stepLog[msg.From] = append(n.stepLog[msg.From],
-				logEntry{n.saw[msg.From], n.wit[msg.From]})
+			logEntry{n.saw[msg.From], n.wit[msg.From]})
 
 		// Continue from pruned copies in the next time step
 		n.saw[msg.From] = n.saw[msg.From].copy(n.save)
@@ -91,7 +89,9 @@ func (n *Node) receiveTLC(msg *Message) {
 
 	case Wit: // A threshold-witnessed message. Collect a threshold of them.
 		prop := n.seqLog[msg.From][msg.Prop]
-		if prop.Typ != Prop { panic("doesn't refer to a proposal!") }
+		if prop.Typ != Prop {
+			panic("doesn't refer to a proposal!")
+		}
 		if msg.Step == n.tmpl.Step {
 
 			// Collect a threshold of Wit witnessed messages.
@@ -104,4 +104,3 @@ func (n *Node) receiveTLC(msg *Message) {
 		}
 	}
 }
-

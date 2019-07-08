@@ -7,9 +7,9 @@ func (n *Node) broadcastCausal(msg *Message) {
 	//	"mat", len(n.mat))
 
 	// Assign the new message a sequence number
-	msg.Seq = len(n.seqLog[n.self])		// Assign sequence number
-	msg.Vec = n.mat[n.self].copy()		// Include vector time update
-	n.logCausal(n.self, msg)		// Add msg to our log
+	msg.Seq = len(n.seqLog[n.self]) // Assign sequence number
+	msg.Vec = n.mat[n.self].copy()  // Include vector time update
+	n.logCausal(n.self, msg)        // Add msg to our log
 	//println(n.self, n.tmpl.Step, "broadcastCausal step", msg.Step,
 	//		"typ", msg.Typ, "seq", msg.Seq,
 	//		"vec", fmt.Sprintf("%v", msg.Vec))
@@ -37,12 +37,12 @@ func (n *Node) logCausal(peer int, msg *Message) {
 			n.mat[peer][i]++
 		}
 	}
-	n.sawCausal(peer, msg)	// msg has been seen by the peer that sent it
+	n.sawCausal(peer, msg)   // msg has been seen by the peer that sent it
 	n.sawCausal(n.self, msg) // and now we've seen the message too
 
 	n.seqLog[peer] = append(n.seqLog[peer], msg) // log this msg
-	n.mat[n.self][peer] = len(n.seqLog[peer]) // update our vector time
-	if len(n.seqLog[peer]) != msg.Seq + 1 {  // sanity check
+	n.mat[n.self][peer] = len(n.seqLog[peer])    // update our vector time
+	if len(n.seqLog[peer]) != msg.Seq+1 {        // sanity check
 		panic("out of sync")
 	}
 }
@@ -53,7 +53,9 @@ func (n *Node) sawCausal(peer int, msg *Message) {
 	n.saw[peer].add(msg)
 	if msg.Typ == Wit {
 		prop := n.seqLog[msg.From][msg.Prop]
-		if prop.Typ != Prop { panic("not a proposal!") }
+		if prop.Typ != Prop {
+			panic("not a proposal!")
+		}
 		n.wit[peer].add(prop)
 	}
 }
@@ -71,7 +73,7 @@ func (n *Node) receiveCausal(msg *Message) {
 
 	// Unicast acknowledgments don't get sequence numbers or reordering.
 	if msg.Typ == Ack {
-		n.receiveTLC(msg)	// Just send it up the stack
+		n.receiveTLC(msg) // Just send it up the stack
 		return
 	}
 
@@ -90,10 +92,10 @@ func (n *Node) receiveCausal(msg *Message) {
 	//if len(n.oom[msg.From]) <= msg.Seq - n.mat[n.self][msg.From] - 1000 {
 	//	panic("huge jump")
 	//}
-	for len(n.oom[msg.From]) <= msg.Seq - n.mat[n.self][msg.From] {
+	for len(n.oom[msg.From]) <= msg.Seq-n.mat[n.self][msg.From] {
 		n.oom[msg.From] = append(n.oom[msg.From], nil)
 	}
-	n.oom[msg.From][msg.Seq - n.mat[n.self][msg.From]] = msg
+	n.oom[msg.From][msg.Seq-n.mat[n.self][msg.From]] = msg
 
 	// Deliver whatever messages we can consistently with causal order.
 	for progress := true; progress; {
@@ -108,7 +110,7 @@ func (n *Node) receiveCausal(msg *Message) {
 // Returns true if we made progress, false if nothing to  do for this peer.
 func (n *Node) deliverCausal(peer int) bool {
 	if len(n.oom[peer]) == 0 || n.oom[peer][0] == nil ||
-			!n.oom[peer][0].Vec.le(n.mat[n.self]) {
+		!n.oom[peer][0].Vec.le(n.mat[n.self]) {
 		return false
 	}
 
@@ -125,7 +127,7 @@ func (n *Node) deliverCausal(peer int) bool {
 	// Deliver the message to upper layers.
 	n.receiveTLC(msg)
 
-	return true	// made progress
+	return true // made progress
 }
 
 // Initialize the causality and higher layer state for a node.
@@ -143,4 +145,3 @@ func (n *Node) initCausal() {
 
 	n.initTLC()
 }
-

@@ -1,8 +1,7 @@
 package dist
 
-
 // Use a map to represent a set of messages
-type set map[*Message] struct{}
+type set map[*Message]struct{}
 
 // Test if msg is in set s.
 func (s set) has(msg *Message) bool {
@@ -26,4 +25,3 @@ func (s set) copy(earliest int) set {
 	}
 	return n
 }
-
