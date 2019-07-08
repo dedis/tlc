@@ -95,6 +95,7 @@ func testCase(t *testing.T, threshold, nnodes, maxSteps, maxTicket int,
 		MaxSteps = maxSteps
 		MaxTicket = int32(maxTicket)
 		MaxSleep = maxSleep
+		Threshold = threshold
 
 		testExec(t, threshold, nnodes)
 	})
