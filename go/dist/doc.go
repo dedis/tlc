@@ -3,5 +3,3 @@
 // It uses TLS/TCP for communication, gob encoding for serialization, and
 // vector time and a basic causal ordering protocol using vector time.
 package dist
-
-

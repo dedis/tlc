@@ -1,6 +1,5 @@
 package dist
 
-
 // Vector timestemp
 type vec []int
 
@@ -34,4 +33,3 @@ func (z vec) max(x, y vec) {
 //func (v vec) String()  {
 //	fmt.Sprintf("%v", []int(v))
 //}
-
