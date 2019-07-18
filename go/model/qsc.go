@@ -1,55 +1,69 @@
+// This package implements a simple pedagogic model of TLC and QSC.
+// It uses no cryptography or real network communication,
+// using only Go channels and asynchronous goroutines to drive consensus.
 package model
+
+import (
+	"math/rand"
+)
+
+// Best is a record representing either a best confirmed proposal,
+// or a best potential spoiler competing with the best confirmed proposal.
+type Best struct {
+	from int // Node the proposal is from (spoiler: -1 for tied tickets)
+	tkt  int // Proposal's genetic fitness ticket
+}
+
+// Find the Best of two records primarily according to highest ticket number.
+// For spoilers, detect and record ticket collisions with invalid node number.
+func (b *Best) merge(o *Best, spoiler bool) {
+	if o.tkt > b.tkt {
+		*b = *o // strictly better ticket
+	} else if o.tkt == b.tkt && o.from != b.from && spoiler {
+		b.from = -1 // record ticket collision
+	}
+}
+
+// Causally-combined QSC summary information for one consensus round
+type Round struct {
+	spoil  Best // Best potential spoiler(s) we've found so far
+	conf   Best // Best confirmed proposal we've found so far
+	reconf Best // Best reconfirmed proposal we've found so far
+	commit bool // Whether we confirm this round successfully committed
+}
+
+// Merge QSC round info from an incoming message into our round history
+func mergeQSC(b, o []Round) {
+	for i := range o {
+		b[i].spoil.merge(&o[i].spoil, true)
+		b[i].conf.merge(&o[i].conf, false)
+		b[i].reconf.merge(&o[i].reconf, false)
+	}
+}
 
 // The TLC layer upcalls this method on advancing to a new time-step,
 // with sets of proposals recently seen (saw) and threshold witnessed (wit).
-func (n *Node) advanceQSC(saw, wit set) {
+func (n *Node) advanceQSC() {
 
-	// Calculate the starting step of the round that's just now completing.
-	s := n.tmpl.step - 3 // Three steps per round
-	if s < 0 {
-		return // Nothing to be done until the first round completes
-	}
+	// Choose a fresh genetic fitness ticket for this proposal
+	n.tkt = 1 + int(rand.Int31n(MaxTicket))
 
-	// Find the best eligible proposal that was broadcast at s+0
-	// and that is in our view by the end of the round at s+3.
-	var bestProp *Message
-	var bestTicket int32
-	for p := range wit {
-		if p.step == s+0 && p.ticket >= bestTicket {
-			bestProp = p
-			bestTicket = p.ticket
-		}
-	}
+	// Initialize consensus state for the round starting at step.
+	// Find best spoiler, breaking ticket ties in favor of higher node
+	n.qsc = append(n.qsc, Round{spoil: Best{from: n.from, tkt: n.tkt}})
 
-	// Determine if we can consider this proposal permanently committed.
-	committed := !n.spoiledQSC(s, saw, bestProp, bestTicket) &&
-		n.reconfirmedQSC(s, wit, bestProp)
-
-	// Record the consensus results for this round (from s to s+3).
-	n.choice = append(n.choice, bestProp)
-	n.commit = append(n.commit, committed)
-
-	// Don't bother saving history before the start of the next round.
-	n.save = s + 1
+	// Decide if the just-completed consensus round successfully committed.
+	r := &n.qsc[n.step]
+	r.commit = r.conf.from == r.reconf.from && r.conf.from == r.spoil.from
 }
 
-// Return true if there's another proposal competitive with a given candidate.
-func (n *Node) spoiledQSC(s int, saw set, prop *Message, ticket int32) bool {
-	for p := range saw {
-		if p.step == s+0 && p.typ == Prop && p != prop &&
-			p.ticket >= ticket {
-			return true // victory spoiled by competition!
-		}
-	}
-	return false
-}
+// TLC layer upcalls this to inform us that our proposal is threshold witnessed
+func (n *Node) witnessedQSC() {
 
-// Return true if given proposal was doubly confirmed (reconfirmed).
-func (n *Node) reconfirmedQSC(s int, wit set, prop *Message) bool {
-	for p := range wit { // search for a paparazzi witness at s+1
-		if p.step == s+1 && p.wit.has(prop) {
-			return true
-		}
-	}
-	return false
+	// Our proposal is now confirmed in the consensus round just starting
+	// Find best confirmed proposal, breaking ties in favor of lower node
+	n.qsc[n.step+3].conf.merge(&Best{from: n.from, tkt: n.tkt}, false)
+
+	// Find reconfirmed proposals for the consensus round that's in step 1
+	n.qsc[n.step+2].reconf.merge(&n.qsc[n.step+2].conf, false)
 }
