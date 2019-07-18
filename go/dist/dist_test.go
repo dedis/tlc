@@ -32,7 +32,7 @@ func (tn *testNode) run(maxSteps int, wg *sync.WaitGroup) {
 }
 
 //  Run a consensus test case with the specified parameters.
-func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
+func testRun(t *testing.T, threshold, nnodes, maxSteps int, maxTicket int64) {
 	desc := fmt.Sprintf("T=%v,N=%v,Steps=%v,Tickets=%v",
 		threshold, nnodes, maxSteps, maxTicket)
 	t.Run(desc, func(t *testing.T) {
@@ -44,8 +44,8 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 			tn[i].n = NewNode(i, threshold, peer)
 			tn[i].c = make(chan *Message, 3*nnodes*maxSteps)
 			if maxTicket > 0 {
-				tn[i].n.Rand = func() int64 {
-					return rand.Int63n(int64(maxTicket))
+				tn[i].n.Rand = func() uint64 {
+					return uint64(rand.Int63n(maxTicket))
 				}
 			}
 			peer[i] = &tn[i]

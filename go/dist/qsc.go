@@ -39,7 +39,7 @@ func mergeQSC(b, o []Round) {
 func (n *Node) advanceQSC() {
 
 	// Choose a fresh genetic fitness ticket for this proposal
-	n.tkt = n.Rand()
+	n.tkt = int64(n.Rand() &^ (1 << 63)) // Ensure it's nonnegative
 
 	// Initialize consensus state for the round starting at step.
 	n.qsc = append(n.qsc, Round{spoil: Best{from: n.from, tkt: n.tkt},

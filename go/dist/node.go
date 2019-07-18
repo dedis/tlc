@@ -1,7 +1,8 @@
 package dist
 
 import (
-	"math/rand"
+	"crypto/rand"
+	"encoding/binary"
 )
 
 type Type int // Type of message
@@ -43,17 +44,19 @@ type Node struct {
 
 	// Consensus uses the Rand function to choose "genetic fitness"
 	// lottery tickets for each node's proposal in each round.
+	// Only the low 63 bits of the returned uint64 are used.
 	//
-	// This defaults to the system's math.rand.Int63() generator.
-	// Cryptographic random numbers should be used instead
-	// if strong, intelligent network adversaries are anticipated.
+	// This defaults to a function that generates lottery tickets
+	// using the system's cryptographic random number generator.
+	// The random source needs to be cryptographically strong to ensure
+	// protection against sophisticated network DoS attackers.
 	//
 	// This function must not be changed once the Node is in operation.
 	// All nodes must use the same nonnegative random number distribution.
 	// Ticket collisions are not a problem as long as they are rare,
-	// which is why 64 bits of entropy is sufficient.
+	// which is why 63 bits of entropy is sufficient.
 	//
-	Rand func() int64
+	Rand func() uint64
 }
 
 // Create and initialize a new Node with the specified group configuration.
@@ -62,10 +65,16 @@ func NewNode(self, threshold int, peers []Peer) (n *Node) {
 		Message: Message{from: self,
 			qsc: make([]Round, 3)}, // "rounds" ending in steps 0-2
 		peer: peers,
-		Broadcast: func(msg *Message) {
+		Broadcast: func(msg *Message) { // Default broadcast function
 			for _, dest := range peers {
 				dest.Send(msg)
 			}
 		},
-		Rand: rand.Int63} // Default random ticket generator
+		Rand: func() uint64 { // Default random ticket generator
+			var b [8]byte
+			if _, err := rand.Read(b[:]); err != nil {
+				panic(err)
+			}
+			return binary.BigEndian.Uint64(b[:])
+		}}
 }
