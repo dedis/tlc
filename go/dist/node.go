@@ -13,11 +13,11 @@ const (
 )
 
 type Message struct {
-	from int     // Which node sent this message
-	step int     // Logical time step this message is for
-	typ  Type    // Message type: Prop, Ack, or Wit
-	tkt  uint64  // Genetic fitness ticket for consensus
-	qsc  []Round // qsc[s] is consensus state for round ending at step s
+	From int     // Which node sent this message
+	Step int     // Logical time step this message is for
+	Type Type    // Message type: Prop, Ack, or Wit
+	Tkt  uint64  // Genetic fitness ticket for consensus
+	QSC  []Round // QSC[s] holds QSC state for round ending at step s
 }
 
 // Peer is the interface to a peer node in the consensus group.
@@ -62,8 +62,8 @@ type Node struct {
 // Create and initialize a new Node with the specified group configuration.
 func NewNode(self, threshold int, peers []Peer) (n *Node) {
 	return &Node{
-		Message: Message{from: self,
-			qsc: make([]Round, 3)}, // "rounds" ending in steps 0-2
+		Message: Message{From: self,
+			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
 		peer: peers,
 		Broadcast: func(msg *Message) { // Default broadcast function
 			for _, dest := range peers {

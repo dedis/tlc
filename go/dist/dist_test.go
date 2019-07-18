@@ -22,7 +22,7 @@ func (tn *testNode) run(maxSteps int, wg *sync.WaitGroup) {
 	tn.n.advanceTLC(0)
 
 	// run the required number of time steps for the test
-	for tn.n.step < maxSteps {
+	for tn.n.Step < maxSteps {
 		msg := <-tn.c        // Receive a msg
 		tn.n.receiveTLC(msg) // Process it
 	}
@@ -64,22 +64,22 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps int, maxTicket int64) {
 
 // Dump the consensus state of node n in round s
 func (tn *testNode) testDump(t *testing.T, s, nn int) {
-	r := &tn.n.qsc[s]
-	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", tn.n.from, s,
-		r.conf.from, int(r.conf.tkt)/nn, int(r.conf.tkt)%nn,
-		r.reconf.from, int(r.reconf.tkt)/nn, int(r.reconf.tkt)%nn,
-		r.spoil.from, int(r.spoil.tkt)/nn, int(r.spoil.tkt)%nn)
+	r := &tn.n.QSC[s]
+	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", tn.n.From, s,
+		r.Conf.From, int(r.Conf.Tkt)/nn, int(r.Conf.Tkt)%nn,
+		r.Reconf.From, int(r.Reconf.Tkt)/nn, int(r.Reconf.Tkt)%nn,
+		r.Spoil.From, int(r.Spoil.Tkt)/nn, int(r.Spoil.Tkt)%nn)
 }
 
 // Globally sanity-check and summarize each node's observed results.
 func testResults(t *testing.T, tn []testNode) {
 	for i, ti := range tn {
 		commits := 0
-		for s := range ti.n.qsc {
-			if ti.n.qsc[s].commit {
+		for s := range ti.n.QSC {
+			if ti.n.QSC[s].Commit {
 				commits++
 				for _, tj := range tn { // verify consensus
-					if tj.n.qsc[s].conf.from != ti.n.qsc[s].conf.from {
+					if tj.n.QSC[s].Conf.From != ti.n.QSC[s].Conf.From {
 						t.Errorf("%v %v UNSAFE", i, s)
 						for _, tk := range tn {
 							tk.testDump(t, s, len(tn))
@@ -89,7 +89,7 @@ func testResults(t *testing.T, tn []testNode) {
 			}
 		}
 		t.Logf("node %v committed %v of %v (%v%% success rate)",
-			i, commits, len(ti.n.qsc), (commits*100)/len(ti.n.qsc))
+			i, commits, len(ti.n.QSC), (commits*100)/len(ti.n.QSC))
 	}
 }
 
@@ -98,10 +98,10 @@ func TestQSC(t *testing.T) {
 	testRun(t, 1, 1, 10000, 0) // Trivial case: 1 of 1 consensus!
 	testRun(t, 2, 2, 10000, 0) // Another trivial case: 2 of 2
 
-	testRun(t, 2, 3, 10000, 0) // Standard f=1 case
-	testRun(t, 3, 5, 10000, 0) // Standard f=2 case
+	testRun(t, 2, 3, 10000, 0)  // Standard f=1 case
+	testRun(t, 3, 5, 10000, 0)  // Standard f=2 case
 	testRun(t, 4, 7, 10000, 0)  // Standard f=3 case
-	testRun(t, 5, 9, 1000, 0)  // Standard f=4 case
+	testRun(t, 5, 9, 1000, 0)   // Standard f=4 case
 	testRun(t, 11, 21, 1000, 0) // Standard f=10 case
 
 	testRun(t, 3, 3, 10000, 0) // Larger-than-minimum thresholds
