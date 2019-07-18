@@ -100,16 +100,17 @@ func TestQSC(t *testing.T) {
 
 	testRun(t, 2, 3, 10000, 0) // Standard f=1 case
 	testRun(t, 3, 5, 10000, 0) // Standard f=2 case
-	testRun(t, 4, 7, 1000, 0)  // Standard f=3 case
+	testRun(t, 4, 7, 10000, 0)  // Standard f=3 case
 	testRun(t, 5, 9, 1000, 0)  // Standard f=4 case
-	testRun(t, 11, 21, 100, 0) // Standard f=10 case
+	testRun(t, 11, 21, 1000, 0) // Standard f=10 case
 
 	testRun(t, 3, 3, 10000, 0) // Larger-than-minimum thresholds
-	testRun(t, 6, 7, 1000, 0)
+	testRun(t, 6, 7, 10000, 0)
 	testRun(t, 9, 10, 1000, 0)
 
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
 	testRun(t, 2, 3, 10000, 1) // Limit case: will never commit
+	testRun(t, 5, 9, 1000, 1)
 	testRun(t, 2, 3, 10000, 2) // Extreme low-entropy: rarely commits
 	testRun(t, 2, 3, 10000, 3) // A bit better bit still bad...
 }

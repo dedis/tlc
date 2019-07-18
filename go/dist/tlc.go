@@ -28,7 +28,7 @@ func (n *Node) advanceTLC(step int) {
 func (n *Node) receiveTLC(msg *Message) {
 
 	for msg.step > n.step { // msg is ahead: virally catch up to it
-		mergeQSC(n.qsc[n.step:], msg.qsc[n.step:n.step+3+1])
+		mergeQSC(n.qsc[n.step:], msg.qsc[n.step:n.step+1])
 		n.advanceTLC(n.step + 1)
 	}
 
