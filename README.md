@@ -6,7 +6,7 @@ Threshold Logical Clocks (TLC) and Que Sera Consensus (QSC).
   of TLC and QSC in Go, which illustrates the key concepts
   using goroutines and shared memory communication for simplicity.
   It is not useful in an actual distributed context,
-  but being less than 250 code lines long
+  but being less than 200 code lines long
   as measured by [cloc](https://github.com/AlDanial/cloc),
   it is ideal for studying and understanding TLC and QSC.
   Playing with or porting this model implementation to some other language may

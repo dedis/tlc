@@ -1,80 +1,48 @@
-package dist
-
-import (
-	"sync"
-)
+package model
 
 var Threshold int // TLC and consensus threshold
+var All []*Node   // List of all nodes
 
-var MaxSteps int
+var MaxSteps int          // Max number of consensus rounds to run
 var MaxTicket int32 = 100 // Amount of entropy in lottery tickets
 
 type Type int // Type of message
 const (
-	Prop Type = iota // Raw unwitnessed proposal
-	Ack              // Acknowledgment of a proposal
-	Wit              // Threshold witness confirmation of proposal
+	Raw Type = iota // Raw unwitnessed proposal
+	Ack             // Acknowledgment of a proposal
+	Wit             // Threshold witness confirmation of proposal
 )
 
 type Message struct {
-	// Network/peering layer
-	From int // Which node originally sent this message
-
-	// Causality layer
-	Seq int // Node-local sequence number for vector time
-	Vec vec // Vector clock update from sender node
-
-	// Threshold time (TLC) layer
-	Step   int   // Logical time step this message is for
-	Typ    Type  // Message type
-	Prop   int   // Proposal Seq this Ack or Wit is about
-	Ticket int32 // Genetic fitness ticket for this proposal
+	from int     // Which node sent this message
+	step int     // Logical time step this message is for
+	typ  Type    // Message type: Prop, Ack, or Wit
+	tkt  int     // Genetic fitness ticket for consensus
+	qsc  []Round // qsc[s] is consensus state for round ending at step s
 }
 
 type Node struct {
-	// Network/peering layer
-	self  int        // This node's participant number
-	peer  []peer     // How to send messages to each peer
-	mutex sync.Mutex // Mutex protecting node's protocol stack
-
-	// Causal history layer
-	mat    []vec        // Node's current matrix clock
-	oom    [][]*Message // Out-of-order messages not yet delivered
-	seqLog [][]*Message // Nodes' message received and delivered by seq
-	saw    []set        // Messages each node saw recently
-	wit    []set        // Witnessed messages each node saw recently
-
-	// Threshold time (TLC) layer
-	tmpl    Message      // Template for messages we send
-	save    int          // Earliest step for which we maintain history
-	acks    set          // Acknowledgments we've received in this step
-	wits    set          // Threshold witnessed messages seen this step
-	stepLog [][]logEntry // Nodes' messages seen by start of recent steps
-
-	// This node's record of QSC consensus history
-	choice []choice // Best proposal this node chose each round
+	Message               // Template for messages we send
+	comm    chan *Message // Channel to send messages to this node
+	acks    int           // # acknowledgments we've received in this step
+	wits    int           // # threshold witnessed messages seen this step
+	done    chan struct{} // Run signals this when a node terminates
 }
 
-type peer interface {
-	Send(msg *Message)
+func newNode(self int) (n *Node) {
+	return &Node{
+		Message: Message{from: self,
+			qsc: make([]Round, 3)}, // "rounds" ending in steps 0-2
+		comm: make(chan *Message, 3*len(All)*MaxSteps),
+		done: make(chan struct{})}
 }
 
-// Info each node logs about other nodes' views at the start of each time-step
-type logEntry struct {
-	saw set // All nodes' messages the node had seen by then
-	wit set // Threshold witnessed messages it had seen
-}
+func (n *Node) run() {
+	n.advanceTLC(0) // broadcast message for initial time step
 
-// Record of one node's QSC decision in one time-step
-type choice struct {
-	best   int  // Best proposal this node chose in this round
-	commit bool // Whether node observed successful commitment
-}
-
-func (n *Node) init(self int, peer []peer) {
-	n.self = self
-	n.peer = peer
-
-	n.initCausal()
-	n.initTLC()
+	for MaxSteps == 0 || n.step < MaxSteps {
+		msg := <-n.comm   // Receive a message
+		n.receiveTLC(msg) // Process it
+	}
+	n.done <- struct{}{} // signal that we're done
 }
