@@ -3,7 +3,7 @@ package dist
 // Best is a record representing either a best confirmed proposal,
 // or a best potential spoiler competing with the best confirmed proposal.
 type Best struct {
-	from int // Node the proposal is from (spoiler: -1 for tied tickets)
+	from int   // Node the proposal is from (spoiler: -1 for tied tickets)
 	tkt  int64 // Proposal's genetic fitness ticket
 }
 
@@ -42,7 +42,8 @@ func (n *Node) advanceQSC() {
 	n.tkt = n.Rand()
 
 	// Initialize consensus state for the round starting at step.
-	n.qsc = append(n.qsc, Round{spoil: Best{from: n.from, tkt: n.tkt}})
+	n.qsc = append(n.qsc, Round{spoil: Best{from: n.from, tkt: n.tkt},
+		conf: Best{tkt: -1}, reconf: Best{tkt: -1}})
 
 	// Decide if the just-completed consensus round successfully committed.
 	r := &n.qsc[n.step]

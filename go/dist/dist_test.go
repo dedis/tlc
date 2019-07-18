@@ -2,65 +2,94 @@ package dist
 
 import (
 	"fmt"
-	"testing"
 	"math/rand"
+	"sync"
+	"testing"
 )
+
+type testNode struct {
+	n *Node         // Node state
+	c chan *Message // Channel to communicate with this testNode
+}
+
+func (tn *testNode) Send(msg *Message) {
+	tn.c <- msg
+}
+
+func (tn *testNode) run(maxSteps int, wg *sync.WaitGroup) {
+
+	// broadcast message for initial time step s=0
+	tn.n.advanceTLC(0)
+
+	// run the required number of time steps for the test
+	for tn.n.step < maxSteps {
+		msg := <-tn.c        // Receive a msg
+		tn.n.receiveTLC(msg) // Process it
+	}
+
+	// signal that we're done
+	wg.Done()
+}
 
 //  Run a consensus test case with the specified parameters.
 func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 	desc := fmt.Sprintf("T=%v,N=%v,Steps=%v,Tickets=%v",
 		threshold, nnodes, maxSteps, maxTicket)
 	t.Run(desc, func(t *testing.T) {
-		Threshold = threshold
-		All = make([]*Node, nnodes)
-		MaxSteps = maxSteps
 
-		for i := range All { // Initialize all the nodes
-			All[i] = newNode(i)
+		// Initialize all the nodes
+		tn := make([]testNode, nnodes)
+		peer := make([]Peer, nnodes)
+		for i := range tn {
+			tn[i].n = NewNode(i, threshold, peer)
+			tn[i].c = make(chan *Message, 3*nnodes*maxSteps)
 			if maxTicket > 0 {
-				All[i].Rand = func() int64 {
+				tn[i].n.Rand = func() int64 {
 					return rand.Int63n(int64(maxTicket))
 				}
 			}
+			peer[i] = &tn[i]
 		}
-		for _, n := range All { // Run the nodes on separate goroutines
-			go n.run()
+
+		// Run the nodes on separate goroutines
+		wg := &sync.WaitGroup{}
+		for i := range tn {
+			wg.Add(1)
+			go tn[i].run(maxSteps, wg)
 		}
-		for _, n := range All { // Wait for each to complete the test
-			<-n.done
-		}
-		testResults(t) // Report test results
+		wg.Wait()
+		testResults(t, tn) // Report test results
 	})
 }
 
 // Dump the consensus state of node n in round s
-func (n *Node) testDump(t *testing.T, s int) {
-	r := &n.qsc[s]
-	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", n.from, s,
-		r.conf.from, int(r.conf.tkt)/len(All), int(r.conf.tkt)%len(All),
-		r.reconf.from, int(r.reconf.tkt)/len(All), int(r.reconf.tkt)%len(All),
-		r.spoil.from, int(r.spoil.tkt)/len(All), int(r.spoil.tkt)%len(All))
+func (tn *testNode) testDump(t *testing.T, s, nn int) {
+	r := &tn.n.qsc[s]
+	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", tn.n.from, s,
+		r.conf.from, int(r.conf.tkt)/nn, int(r.conf.tkt)%nn,
+		r.reconf.from, int(r.reconf.tkt)/nn, int(r.reconf.tkt)%nn,
+		r.spoil.from, int(r.spoil.tkt)/nn, int(r.spoil.tkt)%nn)
 }
 
 // Globally sanity-check and summarize each node's observed results.
-func testResults(t *testing.T) {
-	for i, n := range All {
+func testResults(t *testing.T, tn []testNode) {
+	for i, ti := range tn {
 		commits := 0
-		for s := range n.qsc {
-			if n.qsc[s].commit {
+		for s := range ti.n.qsc {
+			if ti.n.qsc[s].commit {
 				commits++
-				for _, nn := range All { // verify consensus
-					if nn.qsc[s].conf.from != n.qsc[s].conf.from {
+				for _, tj := range tn { // verify consensus
+					if tj.n.qsc[s].conf.from != ti.n.qsc[s].conf.from {
 						t.Errorf("%v %v UNSAFE", i, s)
-						for _, nnn := range All {
-							nnn.testDump(t, s)
+						for _, tk := range tn {
+							tk.testDump(t, s, len(tn))
 						}
 					}
 				}
 			}
 		}
 		t.Logf("node %v committed %v of %v (%v%% success rate)",
-			i, commits, len(n.qsc), (commits*100)/len(n.qsc))
+			i, commits, len(ti.n.qsc), (commits*100)/len(ti.n.qsc))
 	}
 }
 

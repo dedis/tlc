@@ -8,14 +8,6 @@ func (n *Node) newMsg() *Message {
 	return &msg
 }
 
-// Broadcast a copy of our current message template to all nodes
-func (n *Node) broadcastTLC() {
-	msg := n.newMsg()
-	for _, dest := range All {
-		dest.comm <- msg
-	}
-}
-
 // Advance to a new time step.
 func (n *Node) advanceTLC(step int) {
 
@@ -29,17 +21,19 @@ func (n *Node) advanceTLC(step int) {
 	// and let it fill in its part of the new message to broadcast.
 	n.advanceQSC()
 
-	n.broadcastTLC() // broadcast our raw proposal
+	n.Broadcast(n.newMsg()) // broadcast our raw proposal
 }
 
 // The network layer below calls this on receipt of a message from another node.
 func (n *Node) receiveTLC(msg *Message) {
 
 	for msg.step > n.step { // msg is ahead: virally catch up to it
+		mergeQSC(n.qsc[n.step:], msg.qsc[n.step:n.step+3+1])
 		n.advanceTLC(n.step + 1)
 	}
 
-	// Merge in received QSC state for rounds still in our pipeline
+	// Merge in received QSC state for rounds still in our pipeline.
+	// But don't merge QSC state for the round that just ended this step.
 	if msg.step+3 > n.step {
 		mergeQSC(n.qsc[n.step+1:], msg.qsc[n.step+1:])
 	}
@@ -50,19 +44,19 @@ func (n *Node) receiveTLC(msg *Message) {
 		case Raw: // Acknowledge unwitnessed proposals.
 			ack := n.newMsg()
 			ack.typ = Ack
-			All[msg.from].comm <- ack
+			n.peer[msg.from].Send(ack)
 
 		case Ack: // Collect a threshold of acknowledgments.
 			n.acks++
-			if n.typ == Raw && n.acks >= Threshold {
+			if n.typ == Raw && n.acks >= n.thres {
 				n.typ = Wit // Prop now threshold witnessed
 				n.witnessedQSC()
-				n.broadcastTLC()
+				n.Broadcast(n.newMsg())
 			}
 
 		case Wit: // Collect a threshold of threshold witnessed messages
 			n.wits++ // witnessed messages in this step
-			if n.wits >= Threshold {
+			if n.wits >= n.thres {
 				n.advanceTLC(n.step + 1) // tick the clock
 			}
 		}

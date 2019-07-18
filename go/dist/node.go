@@ -4,11 +4,6 @@ import (
 	"math/rand"
 )
 
-var Threshold int // TLC and consensus threshold
-var All []*Node   // List of all nodes
-
-var MaxSteps int          // Max number of consensus rounds to run
-
 type Type int // Type of message
 const (
 	Raw Type = iota // Raw unwitnessed proposal
@@ -24,8 +19,27 @@ type Message struct {
 	qsc  []Round // qsc[s] is consensus state for round ending at step s
 }
 
+// Peer is the interface to a peer node in the consensus group.
+type Peer interface {
+	Send(msg *Message) // Transmit a Message to this peer
+}
+
 type Node struct {
-	Message               // Template for messages we send
+	Message // Template for messages we send
+
+	thres int    // TLC message and witness thresholds
+	peer  []Peer // List of peers in node number order
+
+	acks int // # acknowledgments we've received in this step
+	wits int // # threshold witnessed messages seen this step
+
+	// Optional configuration parameters with defaults below:
+
+	// This function broadcasts a Message to all Peers including ourself.
+	// By default, this simply calls peer.Send on each peer individually,
+	// but this default may be changed if efficient broadcast is available.
+	//
+	Broadcast func(msg *Message)
 
 	// Consensus uses the Rand function to choose "genetic fitness"
 	// lottery tickets for each node's proposal in each round.
@@ -34,33 +48,24 @@ type Node struct {
 	// Cryptographic random numbers should be used instead
 	// if strong, intelligent network adversaries are anticipated.
 	//
-	// All nodes must use the same random number distribution.
+	// This function must not be changed once the Node is in operation.
+	// All nodes must use the same nonnegative random number distribution.
 	// Ticket collisions are not a problem as long as they are rare,
 	// which is why 64 bits of entropy is sufficient.
 	//
-	Rand	func() int64
-
-	comm    chan *Message // Channel to send messages to this node
-	acks    int           // # acknowledgments we've received in this step
-	wits    int           // # threshold witnessed messages seen this step
-	done    chan struct{} // Run signals this when a node terminates
+	Rand func() int64
 }
 
-func newNode(self int) (n *Node) {
+// Create and initialize a new Node with the specified group configuration.
+func NewNode(self, threshold int, peers []Peer) (n *Node) {
 	return &Node{
 		Message: Message{from: self,
 			qsc: make([]Round, 3)}, // "rounds" ending in steps 0-2
-		Rand: rand.Int63,	// Default random ticket generator
-		comm: make(chan *Message, 3*len(All)*MaxSteps),
-		done: make(chan struct{})}
-}
-
-func (n *Node) run() {
-	n.advanceTLC(0) // broadcast message for initial time step
-
-	for MaxSteps == 0 || n.step < MaxSteps {
-		msg := <-n.comm   // Receive a message
-		n.receiveTLC(msg) // Process it
-	}
-	n.done <- struct{}{} // signal that we're done
+		peer: peers,
+		Broadcast: func(msg *Message) {
+			for _, dest := range peers {
+				dest.Send(msg)
+			}
+		},
+		Rand: rand.Int63} // Default random ticket generator
 }
