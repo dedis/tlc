@@ -1,4 +1,4 @@
-package model
+package dist
 
 // Create a copy of our message template for transmission.
 // Also duplicates the slices within the template that are mutable.

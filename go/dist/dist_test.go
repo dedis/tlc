@@ -1,25 +1,27 @@
-package model
+package dist
 
 import (
 	"fmt"
 	"testing"
+	"math/rand"
 )
 
 //  Run a consensus test case with the specified parameters.
 func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
-	if maxTicket == 0 { // Default to moderate-entropy tickets
-		maxTicket = 10 * nnodes
-	}
 	desc := fmt.Sprintf("T=%v,N=%v,Steps=%v,Tickets=%v",
 		threshold, nnodes, maxSteps, maxTicket)
 	t.Run(desc, func(t *testing.T) {
 		Threshold = threshold
 		All = make([]*Node, nnodes)
 		MaxSteps = maxSteps
-		MaxTicket = int32(maxTicket)
 
 		for i := range All { // Initialize all the nodes
 			All[i] = newNode(i)
+			if maxTicket > 0 {
+				All[i].Rand = func() int64 {
+					return rand.Int63n(int64(maxTicket))
+				}
+			}
 		}
 		for _, n := range All { // Run the nodes on separate goroutines
 			go n.run()
@@ -35,9 +37,9 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 func (n *Node) testDump(t *testing.T, s int) {
 	r := &n.qsc[s]
 	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", n.from, s,
-		r.conf.from, r.conf.tkt/len(All), r.conf.tkt%len(All),
-		r.reconf.from, r.reconf.tkt/len(All), r.reconf.tkt%len(All),
-		r.spoil.from, r.spoil.tkt/len(All), r.spoil.tkt%len(All))
+		r.conf.from, int(r.conf.tkt)/len(All), int(r.conf.tkt)%len(All),
+		r.reconf.from, int(r.reconf.tkt)/len(All), int(r.reconf.tkt)%len(All),
+		r.spoil.from, int(r.spoil.tkt)/len(All), int(r.spoil.tkt)%len(All))
 }
 
 // Globally sanity-check and summarize each node's observed results.

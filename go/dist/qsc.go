@@ -1,17 +1,10 @@
-// This package implements a simple pedagogic model of TLC and QSC.
-// It uses no cryptography or real network communication,
-// using only Go channels and asynchronous goroutines to drive consensus.
-package model
-
-import (
-	"math/rand"
-)
+package dist
 
 // Best is a record representing either a best confirmed proposal,
 // or a best potential spoiler competing with the best confirmed proposal.
 type Best struct {
 	from int // Node the proposal is from (spoiler: -1 for tied tickets)
-	tkt  int // Proposal's genetic fitness ticket
+	tkt  int64 // Proposal's genetic fitness ticket
 }
 
 // Find the Best of two records primarily according to highest ticket number.
@@ -46,10 +39,9 @@ func mergeQSC(b, o []Round) {
 func (n *Node) advanceQSC() {
 
 	// Choose a fresh genetic fitness ticket for this proposal
-	n.tkt = 1 + int(rand.Int31n(MaxTicket))
+	n.tkt = n.Rand()
 
 	// Initialize consensus state for the round starting at step.
-	// Find best spoiler, breaking ticket ties in favor of higher node
 	n.qsc = append(n.qsc, Round{spoil: Best{from: n.from, tkt: n.tkt}})
 
 	// Decide if the just-completed consensus round successfully committed.
