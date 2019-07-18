@@ -16,7 +16,7 @@ type Message struct {
 	from int     // Which node sent this message
 	step int     // Logical time step this message is for
 	typ  Type    // Message type: Prop, Ack, or Wit
-	tkt  int64   // Genetic fitness ticket for consensus
+	tkt  uint64  // Genetic fitness ticket for consensus
 	qsc  []Round // qsc[s] is consensus state for round ending at step s
 }
 
