@@ -2,8 +2,8 @@ package model
 
 import (
 	"fmt"
-	"testing"
 	"sync"
+	"testing"
 )
 
 func (n *Node) run(wg *sync.WaitGroup) {
@@ -12,7 +12,7 @@ func (n *Node) run(wg *sync.WaitGroup) {
 	n.advanceTLC(0) // broadcast message for initial time step
 
 	// run the required number of time steps for the test
-	for MaxSteps == 0 || n.step < MaxSteps {
+	for MaxSteps == 0 || n.Step < MaxSteps {
 		msg := <-n.comm   // Receive a message
 		n.receiveTLC(msg) // Process it
 	}
@@ -49,22 +49,22 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 
 // Dump the consensus state of node n in round s
 func (n *Node) testDump(t *testing.T, s int) {
-	r := &n.qsc[s]
-	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", n.from, s,
-		r.conf.from, r.conf.tkt/len(All), r.conf.tkt%len(All),
-		r.reconf.from, r.reconf.tkt/len(All), r.reconf.tkt%len(All),
-		r.spoil.from, r.spoil.tkt/len(All), r.spoil.tkt%len(All))
+	r := &n.QSC[s]
+	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", n.From, s,
+		r.Conf.From, r.Conf.Tkt/len(All), r.Conf.Tkt%len(All),
+		r.Reconf.From, r.Reconf.Tkt/len(All), r.Reconf.Tkt%len(All),
+		r.Spoil.From, r.Spoil.Tkt/len(All), r.Spoil.Tkt%len(All))
 }
 
 // Globally sanity-check and summarize each node's observed results.
 func testResults(t *testing.T) {
 	for i, n := range All {
 		commits := 0
-		for s := range n.qsc {
-			if n.qsc[s].commit {
+		for s := range n.QSC {
+			if n.QSC[s].Commit {
 				commits++
 				for _, nn := range All { // verify consensus
-					if nn.qsc[s].conf.from != n.qsc[s].conf.from {
+					if nn.QSC[s].Conf.From != n.QSC[s].Conf.From {
 						t.Errorf("%v %v UNSAFE", i, s)
 						for _, nnn := range All {
 							nnn.testDump(t, s)
@@ -74,7 +74,7 @@ func testResults(t *testing.T) {
 			}
 		}
 		t.Logf("node %v committed %v of %v (%v%% success rate)",
-			i, commits, len(n.qsc), (commits*100)/len(n.qsc))
+			i, commits, len(n.QSC), (commits*100)/len(n.QSC))
 	}
 }
 

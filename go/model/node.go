@@ -14,11 +14,11 @@ const (
 )
 
 type Message struct {
-	from int     // Which node sent this message
-	step int     // Logical time step this message is for
-	typ  Type    // Message type: Prop, Ack, or Wit
-	tkt  int     // Genetic fitness ticket for consensus
-	qsc  []Round // qsc[s] is consensus state for round ending at step s
+	From int     // Which node sent this message
+	Step int     // Logical time step this message is for
+	Type Type    // Message type: Prop, Ack, or Wit
+	Tkt  int     // Genetic fitness ticket for consensus
+	QSC  []Round // qsc[s] is consensus state for round ending at step s
 }
 
 type Node struct {
@@ -30,8 +30,7 @@ type Node struct {
 
 func newNode(self int) (n *Node) {
 	return &Node{
-		Message: Message{from: self,
-			qsc: make([]Round, 3)}, // "rounds" ending in steps 0-2
+		Message: Message{From: self,
+			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
 		comm: make(chan *Message, 3*len(All)*MaxSteps)}
 }
-
