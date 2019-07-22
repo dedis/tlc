@@ -3,7 +3,23 @@ package model
 import (
 	"fmt"
 	"testing"
+	"sync"
 )
+
+func (n *Node) run(wg *sync.WaitGroup) {
+
+	// broadcast message for initial time step s=0
+	n.advanceTLC(0) // broadcast message for initial time step
+
+	// run the required number of time steps for the test
+	for MaxSteps == 0 || n.step < MaxSteps {
+		msg := <-n.comm   // Receive a message
+		n.receiveTLC(msg) // Process it
+	}
+
+	// signal that we're done
+	wg.Done()
+}
 
 //  Run a consensus test case with the specified parameters.
 func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
@@ -21,12 +37,12 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 		for i := range All { // Initialize all the nodes
 			All[i] = newNode(i)
 		}
+		wg := &sync.WaitGroup{}
 		for _, n := range All { // Run the nodes on separate goroutines
-			go n.run()
+			wg.Add(1)
+			go n.run(wg)
 		}
-		for _, n := range All { // Wait for each to complete the test
-			<-n.done
-		}
+		wg.Wait()
 		testResults(t) // Report test results
 	})
 }

@@ -26,23 +26,12 @@ type Node struct {
 	comm    chan *Message // Channel to send messages to this node
 	acks    int           // # acknowledgments we've received in this step
 	wits    int           // # threshold witnessed messages seen this step
-	done    chan struct{} // Run signals this when a node terminates
 }
 
 func newNode(self int) (n *Node) {
 	return &Node{
 		Message: Message{from: self,
 			qsc: make([]Round, 3)}, // "rounds" ending in steps 0-2
-		comm: make(chan *Message, 3*len(All)*MaxSteps),
-		done: make(chan struct{})}
+		comm: make(chan *Message, 3*len(All)*MaxSteps)}
 }
 
-func (n *Node) run() {
-	n.advanceTLC(0) // broadcast message for initial time step
-
-	for MaxSteps == 0 || n.step < MaxSteps {
-		msg := <-n.comm   // Receive a message
-		n.receiveTLC(msg) // Process it
-	}
-	n.done <- struct{}{} // signal that we're done
-}
