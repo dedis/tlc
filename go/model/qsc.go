@@ -3,15 +3,11 @@
 // using only Go channels and asynchronous goroutines to drive consensus.
 package model
 
-import (
-	"math/rand"
-)
-
 // Best is a record representing either a best confirmed proposal,
 // or a best potential spoiler competing with the best confirmed proposal.
 type Best struct {
-	From int // Node the proposal is from (spoiler: -1 for tied tickets)
-	Tkt  int // Proposal's genetic fitness ticket
+	From int    // Node the proposal is from (spoiler: -1 for tied tickets)
+	Tkt  uint64 // Proposal's genetic fitness ticket
 }
 
 // Find the Best of two records primarily according to highest ticket number.
@@ -46,7 +42,7 @@ func mergeQSC(b, o []Round) {
 func (n *Node) advanceQSC() {
 
 	// Choose a fresh genetic fitness ticket for this proposal
-	n.Tkt = 1 + int(rand.Int31n(MaxTicket))
+	n.Tkt = uint64(n.Rand()) | (1 << 63) // Ensure it's greater than zero
 
 	// Initialize consensus state for the round starting at step.
 	// Find best spoiler, breaking ticket ties in favor of higher node

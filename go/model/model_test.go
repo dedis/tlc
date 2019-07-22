@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 )
@@ -31,11 +32,15 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 	t.Run(desc, func(t *testing.T) {
 		all := make([]*Node, nnodes)
 		peer := make([]chan *Message, nnodes)
-		MaxTicket = int32(maxTicket)
 
 		for i := range all { // Initialize all the nodes
 			peer[i] = make(chan *Message, 3*nnodes*maxSteps)
 			all[i] = NewNode(i, threshold, peer)
+			if maxTicket > 0 {
+				all[i].Rand = func() int64 {
+					return rand.Int63n(int64(maxTicket))
+				}
+			}
 		}
 		wg := &sync.WaitGroup{}
 		for _, n := range all { // Run the nodes on separate goroutines
@@ -50,10 +55,9 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 // Dump the consensus state of node n in round s
 func (n *Node) testDump(t *testing.T, s, nnodes int) {
 	r := &n.QSC[s]
-	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", n.From, s,
-		r.Conf.From, r.Conf.Tkt/nnodes, r.Conf.Tkt%nnodes,
-		r.Reconf.From, r.Reconf.Tkt/nnodes, r.Reconf.Tkt%nnodes,
-		r.Spoil.From, r.Spoil.Tkt/nnodes, r.Spoil.Tkt%nnodes)
+	t.Errorf("%v %v conf %v %v re %v %v spoil %v %v",
+		n.From, s, r.Conf.From, r.Conf.Tkt,
+		r.Reconf.From, r.Reconf.Tkt, r.Spoil.From, r.Spoil.Tkt)
 }
 
 // Globally sanity-check and summarize each node's observed results.
