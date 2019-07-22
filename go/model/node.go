@@ -1,9 +1,5 @@
 package model
 
-var Threshold int // TLC and consensus threshold
-var All []*Node   // List of all nodes
-
-var MaxSteps int          // Max number of consensus rounds to run
 var MaxTicket int32 = 100 // Amount of entropy in lottery tickets
 
 type Type int // Type of message
@@ -22,15 +18,20 @@ type Message struct {
 }
 
 type Node struct {
-	Message               // Template for messages we send
-	comm    chan *Message // Channel to send messages to this node
-	acks    int           // # acknowledgments we've received in this step
-	wits    int           // # threshold witnessed messages seen this step
+	Message // Template for messages we send
+
+	thres int             // TLC message and witness thresholds
+	peer  []chan *Message // Channels to send messages to peers
+
+	acks int // # acknowledgments we've received in this step
+	wits int // # threshold witnessed messages seen this step
 }
 
-func newNode(self int) (n *Node) {
+// Create and initialize a new Node with the specified group configuration.
+func NewNode(self, threshold int, peer []chan *Message) (n *Node) {
 	return &Node{
 		Message: Message{From: self,
 			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
-		comm: make(chan *Message, 3*len(All)*MaxSteps)}
+		thres: threshold,
+		peer:  peer}
 }

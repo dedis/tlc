@@ -6,15 +6,15 @@ import (
 	"testing"
 )
 
-func (n *Node) run(wg *sync.WaitGroup) {
+func (n *Node) run(maxSteps int, wg *sync.WaitGroup) {
 
 	// broadcast message for initial time step s=0
 	n.advanceTLC(0) // broadcast message for initial time step
 
 	// run the required number of time steps for the test
-	for MaxSteps == 0 || n.Step < MaxSteps {
-		msg := <-n.comm   // Receive a message
-		n.receiveTLC(msg) // Process it
+	for n.Step < maxSteps {
+		msg := <-n.peer[n.From] // Receive a message
+		n.receiveTLC(msg)       // Process it
 	}
 
 	// signal that we're done
@@ -29,45 +29,45 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 	desc := fmt.Sprintf("T=%v,N=%v,Steps=%v,Tickets=%v",
 		threshold, nnodes, maxSteps, maxTicket)
 	t.Run(desc, func(t *testing.T) {
-		Threshold = threshold
-		All = make([]*Node, nnodes)
-		MaxSteps = maxSteps
+		all := make([]*Node, nnodes)
+		peer := make([]chan *Message, nnodes)
 		MaxTicket = int32(maxTicket)
 
-		for i := range All { // Initialize all the nodes
-			All[i] = newNode(i)
+		for i := range all { // Initialize all the nodes
+			peer[i] = make(chan *Message, 3*nnodes*maxSteps)
+			all[i] = NewNode(i, threshold, peer)
 		}
 		wg := &sync.WaitGroup{}
-		for _, n := range All { // Run the nodes on separate goroutines
+		for _, n := range all { // Run the nodes on separate goroutines
 			wg.Add(1)
-			go n.run(wg)
+			go n.run(maxSteps, wg)
 		}
 		wg.Wait()
-		testResults(t) // Report test results
+		testResults(t, all) // Report test results
 	})
 }
 
 // Dump the consensus state of node n in round s
-func (n *Node) testDump(t *testing.T, s int) {
+func (n *Node) testDump(t *testing.T, s, nnodes int) {
 	r := &n.QSC[s]
 	t.Errorf("%v %v conf %v %v %v re %v %v %v spoil %v %v %v", n.From, s,
-		r.Conf.From, r.Conf.Tkt/len(All), r.Conf.Tkt%len(All),
-		r.Reconf.From, r.Reconf.Tkt/len(All), r.Reconf.Tkt%len(All),
-		r.Spoil.From, r.Spoil.Tkt/len(All), r.Spoil.Tkt%len(All))
+		r.Conf.From, r.Conf.Tkt/nnodes, r.Conf.Tkt%nnodes,
+		r.Reconf.From, r.Reconf.Tkt/nnodes, r.Reconf.Tkt%nnodes,
+		r.Spoil.From, r.Spoil.Tkt/nnodes, r.Spoil.Tkt%nnodes)
 }
 
 // Globally sanity-check and summarize each node's observed results.
-func testResults(t *testing.T) {
-	for i, n := range All {
+func testResults(t *testing.T, all []*Node) {
+	for i, n := range all {
 		commits := 0
 		for s := range n.QSC {
 			if n.QSC[s].Commit {
 				commits++
-				for _, nn := range All { // verify consensus
+				for _, nn := range all { // verify consensus
 					if nn.QSC[s].Conf.From != n.QSC[s].Conf.From {
 						t.Errorf("%v %v UNSAFE", i, s)
-						for _, nnn := range All {
-							nnn.testDump(t, s)
+						for _, nnn := range all {
+							nnn.testDump(t, s, len(all))
 						}
 					}
 				}

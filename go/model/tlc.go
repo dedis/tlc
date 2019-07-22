@@ -11,8 +11,8 @@ func (n *Node) newMsg() *Message {
 // Broadcast a copy of our current message template to all nodes
 func (n *Node) broadcastTLC() {
 	msg := n.newMsg()
-	for _, dest := range All {
-		dest.comm <- msg
+	for _, dest := range n.peer {
+		dest <- msg
 	}
 }
 
@@ -50,11 +50,11 @@ func (n *Node) receiveTLC(msg *Message) {
 		case Raw: // Acknowledge unwitnessed proposals.
 			ack := n.newMsg()
 			ack.Type = Ack
-			All[msg.From].comm <- ack
+			n.peer[msg.From] <- ack
 
 		case Ack: // Collect a threshold of acknowledgments.
 			n.acks++
-			if n.Type == Raw && n.acks >= Threshold {
+			if n.Type == Raw && n.acks >= n.thres {
 				n.Type = Wit // Prop now threshold witnessed
 				n.witnessedQSC()
 				n.broadcastTLC()
@@ -62,7 +62,7 @@ func (n *Node) receiveTLC(msg *Message) {
 
 		case Wit: // Collect a threshold of threshold witnessed messages
 			n.wits++ // witnessed messages in this step
-			if n.wits >= Threshold {
+			if n.wits >= n.thres {
 				n.advanceTLC(n.Step + 1) // tick the clock
 			}
 		}
