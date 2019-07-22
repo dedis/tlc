@@ -64,6 +64,7 @@ func NewNode(self, threshold int, peers []Peer) (n *Node) {
 	return &Node{
 		Message: Message{From: self,
 			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
+		thres: threshold,
 		peer: peers,
 		Broadcast: func(msg *Message) { // Default broadcast function
 			for _, dest := range peers {
