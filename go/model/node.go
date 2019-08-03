@@ -17,6 +17,7 @@ type Message struct {
 	QSC  []Round // qsc[s] is consensus state for round ending at step s
 }
 
+// Node contains per-node state and configuration for TLC and QSC.
 type Node struct {
 	Message // Template for messages we send
 

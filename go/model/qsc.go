@@ -1,6 +1,14 @@
 // This package implements a simple pedagogic model of TLC and QSC.
 // It uses no cryptography or real network communication,
 // using only Go channels and asynchronous goroutines to drive consensus.
+//
+// To read about the principles underlying TLC and QSC, please refer to:
+// https://arxiv.org/abs/1907.07010
+//
+// For a high-level overview of the different implementations of TLC/QSC
+// in different languages that live in this repository, please see:
+// https://github.com/dedis/tlc/
+//
 package model
 
 // Best is a record representing either a best confirmed proposal,
