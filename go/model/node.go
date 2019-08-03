@@ -18,6 +18,8 @@ type Message struct {
 }
 
 // Node contains per-node state and configuration for TLC and QSC.
+// Use NewNode to create and properly initialize an instance.
+//
 type Node struct {
 	Message // Template for messages we send
 

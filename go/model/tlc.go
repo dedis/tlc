@@ -1,10 +1,10 @@
 package model
 
 // Create a copy of our message template for transmission.
-// Also duplicates the slices within the template that are mutable.
+// Sends QSC state only for the rounds still in our window.
 func (n *Node) newMsg() *Message {
-	msg := n.Message                      // copy the message template
-	msg.QSC = append([]Round{}, n.QSC...) // copy QSC state slice
+	msg := n.Message                               // copy the message template
+	msg.QSC = append([]Round{}, n.QSC[n.Step:]...) // active QSC state
 	return &msg
 }
 
@@ -33,19 +33,23 @@ func (n *Node) advanceTLC(step int) {
 }
 
 // The network layer below calls this on receipt of a message from another node.
+// This function assumes that peer-to-peer connections are ordered and reliable.
 func (n *Node) receiveTLC(msg *Message) {
 
-	for msg.Step > n.Step { // msg is ahead: virally catch up to it
-		n.advanceTLC(n.Step + 1)
-	}
+	// Process only messages from the current or next time step.
+	// Since we receive messages from a given peer in order,
+	// a message we receive can be at most one step ahead of ours.
+	if msg.Step >= n.Step {
 
-	// Merge in received QSC state for rounds still in our pipeline
-	if msg.Step+3 > n.Step {
-		mergeQSC(n.QSC[n.Step+1:], msg.QSC[n.Step+1:])
-	}
+		// If msg is ahead of us, then virally catch up to it
+		if msg.Step > n.Step {
+			n.advanceTLC(n.Step + 1)
+		}
 
-	// Now process this message according to type, but only in same step.
-	if msg.Step == n.Step {
+		// Merge in received QSC state for rounds still in our pipeline
+		mergeQSC(n.QSC[msg.Step:], msg.QSC)
+
+		// Now process this message according to type.
 		switch msg.Type {
 		case Raw: // Acknowledge unwitnessed proposals.
 			ack := n.newMsg()

@@ -38,7 +38,7 @@ type Round struct {
 
 // Merge QSC round info from an incoming message into our round history
 func mergeQSC(b, o []Round) {
-	for i := range o {
+	for i := range b {
 		b[i].Spoil.merge(&o[i].Spoil, true)
 		b[i].Conf.merge(&o[i].Conf, false)
 		b[i].Reconf.merge(&o[i].Reconf, false)

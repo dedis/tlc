@@ -85,21 +85,21 @@ func testResults(t *testing.T, all []*Node) {
 
 // Run QSC consensus for a variety of test cases.
 func TestQSC(t *testing.T) {
-	testRun(t, 1, 1, 10000, 0) // Trivial case: 1 of 1 consensus!
-	testRun(t, 2, 2, 10000, 0) // Another trivial case: 2 of 2
+	testRun(t, 1, 1, 100000, 0) // Trivial case: 1 of 1 consensus!
+	testRun(t, 2, 2, 100000, 0) // Another trivial case: 2 of 2
 
-	testRun(t, 2, 3, 10000, 0) // Standard f=1 case
-	testRun(t, 3, 5, 10000, 0) // Standard f=2 case
-	testRun(t, 4, 7, 1000, 0)  // Standard f=3 case
-	testRun(t, 5, 9, 1000, 0)  // Standard f=4 case
-	testRun(t, 11, 21, 100, 0) // Standard f=10 case
+	testRun(t, 2, 3, 100000, 0) // Standard f=1 case
+	testRun(t, 3, 5, 100000, 0) // Standard f=2 case
+	testRun(t, 4, 7, 10000, 0)  // Standard f=3 case
+	testRun(t, 5, 9, 10000, 0)  // Standard f=4 case
+	testRun(t, 11, 21, 10000, 0) // Standard f=10 case
 
-	testRun(t, 3, 3, 10000, 0) // Larger-than-minimum thresholds
-	testRun(t, 6, 7, 1000, 0)
-	testRun(t, 9, 10, 1000, 0)
+	testRun(t, 3, 3, 100000, 0) // Larger-than-minimum thresholds
+	testRun(t, 6, 7, 10000, 0)
+	testRun(t, 9, 10, 10000, 0)
 
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
-	testRun(t, 2, 3, 10000, 1) // Limit case: will never commit
-	testRun(t, 2, 3, 10000, 2) // Extreme low-entropy: rarely commits
-	testRun(t, 2, 3, 10000, 3) // A bit better bit still bad...
+	testRun(t, 2, 3, 100000, 1) // Limit case: will never commit
+	testRun(t, 2, 3, 100000, 2) // Extreme low-entropy: rarely commits
+	testRun(t, 2, 3, 100000, 3) // A bit better bit still bad...
 }
