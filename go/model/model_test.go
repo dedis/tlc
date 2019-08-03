@@ -7,15 +7,15 @@ import (
 	"testing"
 )
 
-func (n *Node) run(maxSteps int, wg *sync.WaitGroup) {
+func (n *Node) run(maxSteps int, peer []chan *Message, wg *sync.WaitGroup) {
 
 	// broadcast message for initial time step s=0
 	n.advanceTLC(0) // broadcast message for initial time step
 
 	// run the required number of time steps for the test
 	for n.Step < maxSteps {
-		msg := <-n.peer[n.From] // Receive a message
-		n.receiveTLC(msg)       // Process it
+		msg := <-peer[n.From] // Receive a message
+		n.receiveTLC(msg)     // Process it
 	}
 
 	// signal that we're done
@@ -32,10 +32,11 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 	t.Run(desc, func(t *testing.T) {
 		all := make([]*Node, nnodes)
 		peer := make([]chan *Message, nnodes)
+		send := func(i int, m *Message) { peer[i] <- m }
 
 		for i := range all { // Initialize all the nodes
 			peer[i] = make(chan *Message, 3*nnodes*maxSteps)
-			all[i] = NewNode(i, threshold, peer)
+			all[i] = NewNode(i, threshold, nnodes, send)
 			if maxTicket > 0 {
 				all[i].Rand = func() int64 {
 					return rand.Int63n(int64(maxTicket))
@@ -45,7 +46,7 @@ func testRun(t *testing.T, threshold, nnodes, maxSteps, maxTicket int) {
 		wg := &sync.WaitGroup{}
 		for _, n := range all { // Run the nodes on separate goroutines
 			wg.Add(1)
-			go n.run(maxSteps, wg)
+			go n.run(maxSteps, peer, wg)
 		}
 		wg.Wait()
 		testResults(t, all) // Report test results

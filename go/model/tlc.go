@@ -11,8 +11,8 @@ func (n *Node) newMsg() *Message {
 // Broadcast a copy of our current message template to all nodes
 func (n *Node) broadcastTLC() {
 	msg := n.newMsg()
-	for _, dest := range n.peer {
-		dest <- msg
+	for i := 0; i < n.nnode; i++ {
+		n.send(i, msg)
 	}
 }
 
@@ -50,7 +50,7 @@ func (n *Node) receiveTLC(msg *Message) {
 		case Raw: // Acknowledge unwitnessed proposals.
 			ack := n.newMsg()
 			ack.Type = Ack
-			n.peer[msg.From] <- ack
+			n.send(msg.From, ack)
 
 		case Ack: // Collect a threshold of acknowledgments.
 			n.acks++

@@ -21,8 +21,9 @@ type Message struct {
 type Node struct {
 	Message // Template for messages we send
 
-	thres int             // TLC message and witness thresholds
-	peer  []chan *Message // Channels to send messages to peers
+	thres int                          // TLC message and witness thresholds
+	nnode int                          // Total number of nodes
+	send  func(peer int, msg *Message) // Function to send message to a peer
 
 	acks int // # acknowledgments we've received in this step
 	wits int // # threshold witnessed messages seen this step
@@ -45,11 +46,10 @@ type Node struct {
 }
 
 // Create and initialize a new Node with the specified group configuration.
-func NewNode(self, threshold int, peer []chan *Message) (n *Node) {
+func NewNode(self, thres, nnode int, send func(peer int, msg *Message)) (n *Node) {
 	return &Node{
 		Message: Message{From: self,
 			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
-		thres: threshold,
-		peer:  peer,
-		Rand:  rand.Int63}
+		thres: thres, nnode: nnode, send: send,
+		Rand: rand.Int63}
 }
