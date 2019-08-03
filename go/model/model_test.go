@@ -13,9 +13,9 @@ func (n *Node) run(maxSteps int, peer []chan *Message, wg *sync.WaitGroup) {
 	n.advanceTLC(0) // broadcast message for initial time step
 
 	// run the required number of time steps for the test
-	for n.Step < maxSteps {
-		msg := <-peer[n.From] // Receive a message
-		n.receiveTLC(msg)     // Process it
+	for n.m.Step < maxSteps {
+		msg := <-peer[n.m.From] // Receive a message
+		n.receiveTLC(msg)       // Process it
 	}
 
 	// signal that we're done
@@ -55,31 +55,32 @@ func testRun(t *testing.T, thres, nnode, maxSteps, maxTicket int) {
 
 // Dump the consensus state of node n in round s
 func (n *Node) testDump(t *testing.T, s, nnode int) {
-	r := &n.QSC[s]
+	r := &n.m.QSC[s]
 	t.Errorf("%v %v conf %v %v re %v %v spoil %v %v",
-		n.From, s, r.Conf.From, r.Conf.Tkt,
+		n.m.From, s, r.Conf.From, r.Conf.Tkt,
 		r.Reconf.From, r.Reconf.Tkt, r.Spoil.From, r.Spoil.Tkt)
 }
 
 // Globally sanity-check and summarize each node's observed results.
 func testResults(t *testing.T, all []*Node) {
-	for i, n := range all {
+	for i, ni := range all {
 		commits := 0
-		for s := range n.QSC {
-			if n.QSC[s].Commit {
+		for s, si := range ni.m.QSC {
+			if si.Commit {
 				commits++
-				for _, nn := range all { // verify consensus
-					if nn.QSC[s].Conf.From != n.QSC[s].Conf.From {
+				for _, nj := range all { // verify consensus
+					if nj.m.QSC[s].Conf.From !=
+						si.Conf.From {
+
 						t.Errorf("%v %v UNSAFE", i, s)
-						for _, nnn := range all {
-							nnn.testDump(t, s, len(all))
-						}
+						ni.testDump(t, s, len(all))
+						nj.testDump(t, s, len(all))
 					}
 				}
 			}
 		}
 		t.Logf("node %v committed %v of %v (%v%% success rate)",
-			i, commits, len(n.QSC), (commits*100)/len(n.QSC))
+			i, commits, len(ni.m.QSC), (commits*100)/len(ni.m.QSC))
 	}
 }
 

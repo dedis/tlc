@@ -57,8 +57,7 @@ type Message struct {
 // which is why 63 bits of entropy is sufficient.
 //
 type Node struct {
-	Message              // Template for messages we send
-	Rand    func() int64 // Function to generate random genetic fitness tickets
+	m Message // Template for messages we send
 
 	thres int                          // TLC message and witness thresholds
 	nnode int                          // Total number of nodes
@@ -67,6 +66,7 @@ type Node struct {
 	acks int // # acknowledgments we've received in this step
 	wits int // # threshold witnessed messages seen this step
 
+	Rand func() int64 // Function to generate random genetic fitness tickets
 }
 
 // Create and initialize a new Node with the specified group configuration.
@@ -80,7 +80,7 @@ type Node struct {
 //
 func NewNode(self, thres, nnode int, send func(peer int, msg *Message)) (n *Node) {
 	return &Node{
-		Message: Message{From: self,
+		m: Message{From: self,
 			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
 		thres: thres, nnode: nnode, send: send,
 		Rand: rand.Int63}

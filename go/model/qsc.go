@@ -72,14 +72,15 @@ func mergeQSC(b, o []Round) {
 func (n *Node) advanceQSC() {
 
 	// Choose a fresh genetic fitness ticket for this proposal
-	n.Tkt = uint64(n.Rand()) | (1 << 63) // Ensure it's greater than zero
+	n.m.Tkt = uint64(n.Rand()) | (1 << 63) // Ensure it's greater than zero
 
 	// Initialize consensus state for the round starting at step.
 	// Find best spoiler, breaking ticket ties in favor of higher node
-	n.QSC = append(n.QSC, Round{Spoil: Best{From: n.From, Tkt: n.Tkt}})
+	newRound := Round{Spoil: Best{From: n.m.From, Tkt: n.m.Tkt}}
+	n.m.QSC = append(n.m.QSC, newRound)
 
 	// Decide if the just-completed consensus round successfully committed.
-	r := &n.QSC[n.Step]
+	r := &n.m.QSC[n.m.Step]
 	r.Commit = r.Conf.From == r.Reconf.From && r.Conf.From == r.Spoil.From
 }
 
@@ -88,8 +89,9 @@ func (n *Node) witnessedQSC() {
 
 	// Our proposal is now confirmed in the consensus round just starting
 	// Find best confirmed proposal, breaking ties in favor of lower node
-	n.QSC[n.Step+3].Conf.merge(&Best{From: n.From, Tkt: n.Tkt}, false)
+	myBest := &Best{From: n.m.From, Tkt: n.m.Tkt}
+	n.m.QSC[n.m.Step+3].Conf.merge(myBest, false)
 
 	// Find reconfirmed proposals for the consensus round that's in step 1
-	n.QSC[n.Step+2].Reconf.merge(&n.QSC[n.Step+2].Conf, false)
+	n.m.QSC[n.m.Step+2].Reconf.merge(&n.m.QSC[n.m.Step+2].Conf, false)
 }
