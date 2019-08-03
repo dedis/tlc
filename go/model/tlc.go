@@ -32,10 +32,15 @@ func (n *Node) advanceTLC(step int) {
 	n.broadcastTLC() // broadcast our raw proposal
 }
 
-// The network layer below calls this on receipt of a message from another node.
+// The client or network layer calls this on receipt of a Message from a peer.
+// Any unmarshaling that may be required must have already been done.
+//
 // This function assumes that peer-to-peer connections are ordered and reliable,
 // as they are when sent over Go channels or TCP/TLS connections.
-func (n *Node) receiveTLC(msg *Message) {
+// It also assumes that connection or peer failures are permanent:
+// this implementation of QSC does not support restarting/resuming connections.
+//
+func (n *Node) Receive(msg *Message) {
 
 	// Process only messages from the current or next time step.
 	// We could accept and merge in information from older messages,

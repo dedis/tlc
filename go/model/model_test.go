@@ -15,7 +15,7 @@ func (n *Node) run(maxSteps int, peer []chan *Message, wg *sync.WaitGroup) {
 	// run the required number of time steps for the test
 	for n.m.Step < maxSteps {
 		msg := <-peer[n.m.From] // Receive a message
-		n.receiveTLC(msg)       // Process it
+		n.Receive(msg)          // Process it
 	}
 
 	// signal that we're done

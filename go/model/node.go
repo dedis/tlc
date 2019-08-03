@@ -28,6 +28,14 @@ const (
 
 // Message contains the information nodes must pass in messages
 // both to run the TLC clocking protocol and achieve QSC consensus.
+//
+// This implementation of QSC performs no message marshaling or unmarshalling;
+// the client using it must handle message wire-format serialization.
+// However, the Message struct is defined so as to be compatible with
+// standard Go encoders such as encoding/gob or encoding/json.
+// The client may also marshal/unmarshal its own larger message struct
+// containing a superset of the information here,
+// such as to attach semantic content in some form to consensus proposals.
 type Message struct {
 	From int     // Node number of node that sent this message
 	Step int     // Logical time step this message is for
