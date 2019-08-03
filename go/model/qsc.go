@@ -12,7 +12,24 @@
 package model
 
 // Best is a record representing either a best confirmed proposal,
-// or a best potential spoiler competing with the best confirmed proposal.
+// or a best potential spoiler competing with the best confirmed proposal,
+// used in the Round struct.
+//
+// In each case, the only information we really need is
+// the genetic fitness lottery ticket of the "best" proposal seen so far,
+// and which node produced that proposal.
+// This optimization works only in the non-Byzantine QSC consensus protocol,
+// because Byzantine consensus requires that the lottery tickets be
+// unknown and unbiasable to everyone until the consensus round completes.
+//
+// When we're collecting the best potential spoiler proposal -
+// the proposal with the highest ticket regardless of whether it's confirmed -
+// we must keep track of ticket collisions,
+// in case one colliding proposal might "win" if not spoiled by the other.
+// When we detect a spoiler collision, we simply set From to -1,
+// an invalid node number that will be unequal to, and hence properly "spoil",
+// a confirmed or reconfirmed proposal with the same ticket from any node.
+//
 type Best struct {
 	From int    // Node the proposal is from (spoiler: -1 for tied tickets)
 	Tkt  uint64 // Proposal's genetic fitness ticket
@@ -28,7 +45,12 @@ func (b *Best) merge(o *Best, spoiler bool) {
 	}
 }
 
-// Causally-combined QSC summary information for one consensus round
+// Round encapsulates all the QSC state needed for one consensus round:
+// the best potential "spoiler" proposal regardless of confirmation status,
+// the best confirmed (witnessed) proposal we've seen so far in the round,
+// and the best reconfirmed (double-witnessed) proposal we've seen so far.
+// Finally, at the end of the round, we set Commit to true if
+// the best confirmed proposal in Conf has definitely been committed.
 type Round struct {
 	Spoil  Best // Best potential spoiler(s) we've found so far
 	Conf   Best // Best confirmed proposal we've found so far

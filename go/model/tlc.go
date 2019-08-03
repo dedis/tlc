@@ -39,6 +39,8 @@ func (n *Node) receiveTLC(msg *Message) {
 	// Process only messages from the current or next time step.
 	// Since we receive messages from a given peer in order,
 	// a message we receive can be at most one step ahead of ours.
+	// We could accept and merge in information from older messages,
+	// but it's safe and simpler just to ignore old messages.
 	if msg.Step >= n.Step {
 
 		// If msg is ahead of us, then virally catch up to it
