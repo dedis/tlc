@@ -10,7 +10,7 @@ import (
 func (n *Node) run(maxSteps int, peer []chan *Message, wg *sync.WaitGroup) {
 
 	// broadcast message for initial time step s=0
-	n.advanceTLC(0) // broadcast message for initial time step
+	n.Advance() // broadcast message for initial time step
 
 	// run the required number of time steps for the test
 	for n.m.Step < maxSteps {

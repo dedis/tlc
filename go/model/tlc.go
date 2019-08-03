@@ -16,14 +16,19 @@ func (n *Node) broadcastTLC() {
 	}
 }
 
-// Advance to a new time step.
-func (n *Node) advanceTLC(step int) {
+// Advance to the next TLC time step.
+//
+// The client must invoke this function once after calling NewNode
+// to launch the protocol and broadcast the message for TLC time-step zero.
+// Thereafter, TLC advances time automatically based on network communication.
+//
+func (n *Node) Advance() {
 
 	// Initialize message template with a proposal for the new time step
-	n.m.Step = step // Advance to new time step
-	n.m.Type = Raw  // Broadcast raw proposal first
-	n.acks = 0      // No acknowledgments received yet in this step
-	n.wits = 0      // No threshold witnessed messages received yet
+	n.m.Step += 1  // Advance to next time step
+	n.m.Type = Raw // Broadcast raw proposal first
+	n.acks = 0     // No acknowledgments received yet in this step
+	n.wits = 0     // No threshold witnessed messages received yet
 
 	// Notify the upper (QSC) layer of the advancement of time,
 	// and let it fill in its part of the new message to broadcast.
@@ -51,7 +56,7 @@ func (n *Node) Receive(msg *Message) {
 		// Since we receive messages from a given peer in order,
 		// a message we receive can be at most one step ahead of ours.
 		if msg.Step > n.m.Step {
-			n.advanceTLC(n.m.Step + 1)
+			n.Advance()
 		}
 
 		// Merge in received QSC state for rounds still in our pipeline
@@ -75,7 +80,7 @@ func (n *Node) Receive(msg *Message) {
 		case Wit: // Collect a threshold of threshold witnessed messages
 			n.wits++ // witnessed messages in this step
 			if n.wits >= n.thres {
-				n.advanceTLC(n.m.Step + 1) // tick the clock
+				n.Advance() // tick the clock
 			}
 		}
 	}

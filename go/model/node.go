@@ -88,7 +88,7 @@ type Node struct {
 //
 func NewNode(self, thres, nnode int, send func(peer int, msg *Message)) (n *Node) {
 	return &Node{
-		m: Message{From: self,
+		m: Message{From: self, Step: -1,
 			QSC: make([]Round, 3)}, // "rounds" ending in steps 0-2
 		thres: thres, nnode: nnode, send: send,
 		Rand: rand.Int63}
