@@ -3,7 +3,7 @@ package model
 // Create a copy of our message template for transmission.
 // Sends QSC state only for the rounds still in our window.
 func (n *Node) newMsg() *Message {
-	msg := n.Message                               // copy the message template
+	msg := n.Message                               // copy message template
 	msg.QSC = append([]Round{}, n.QSC[n.Step:]...) // active QSC state
 	return &msg
 }
@@ -33,17 +33,18 @@ func (n *Node) advanceTLC(step int) {
 }
 
 // The network layer below calls this on receipt of a message from another node.
-// This function assumes that peer-to-peer connections are ordered and reliable.
+// This function assumes that peer-to-peer connections are ordered and reliable,
+// as they are when sent over Go channels or TCP/TLS connections.
 func (n *Node) receiveTLC(msg *Message) {
 
 	// Process only messages from the current or next time step.
-	// Since we receive messages from a given peer in order,
-	// a message we receive can be at most one step ahead of ours.
 	// We could accept and merge in information from older messages,
-	// but it's safe and simpler just to ignore old messages.
+	// but it's perfectly safe and simpler just to ignore old messages.
 	if msg.Step >= n.Step {
 
 		// If msg is ahead of us, then virally catch up to it
+		// Since we receive messages from a given peer in order,
+		// a message we receive can be at most one step ahead of ours.
 		if msg.Step > n.Step {
 			n.advanceTLC(n.Step + 1)
 		}
