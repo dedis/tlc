@@ -3,8 +3,13 @@
 // but should be usable in scenarios that would typically employ Paxos or Raft.
 //
 // This implementation is less than 200 lines of actual code as counted by CLOC,
-// so the best way to understand it is to read the code directly at
+// so a good way to understand it is to read the code directly at
 // https://github.com/dedis/tlc/tree/master/go/model.
+// You can test this implementation in a variety of consensus configurations
+// using only goroutines and channels for communication via:
+//
+//	go test -v
+//
 // To read about the principles underlying TLC and QSC, please refer to
 // https://arxiv.org/abs/1907.07010.
 // For a high-level overview of the different implementations of TLC/QSC
