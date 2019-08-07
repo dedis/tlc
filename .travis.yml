@@ -1,0 +1,18 @@
+dist: bionic
+
+language: go
+
+go:
+- 1.12.x
+
+before_install:
+  - sudo apt-get install -y spin
+
+install:
+- go get -u golang.org/x/lint/golint
+
+script:
+- go vet ./...
+- golint -set_exit_status ./...
+- go test ./...
+- cd spin; ./run.sh
