@@ -1,4 +1,4 @@
-// This package implements a simple pedagogic model of TLC and QSC.
+// Package model implements a simple pedagogic model of TLC and QSC.
 // It uses no cryptography and supports only failstop, non-Byzantine consensus,
 // but should be usable in scenarios that would typically employ Paxos or Raft.
 //

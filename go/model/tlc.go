@@ -25,7 +25,7 @@ func (n *Node) broadcastTLC() {
 func (n *Node) Advance() {
 
 	// Initialize message template with a proposal for the new time step
-	n.m.Step += 1  // Advance to next time step
+	n.m.Step++     // Advance to next time step
 	n.m.Type = Raw // Broadcast raw proposal first
 	n.acks = 0     // No acknowledgments received yet in this step
 	n.wits = 0     // No threshold witnessed messages received yet
@@ -37,7 +37,7 @@ func (n *Node) Advance() {
 	n.broadcastTLC() // broadcast our raw proposal
 }
 
-// The client or network layer calls this on receipt of a Message from a peer.
+// Receive is called by the client or network layer on receipt of a Message from a peer.
 // Any unmarshaling that may be required must have already been done.
 //
 // This function assumes that peer-to-peer connections are ordered and reliable,

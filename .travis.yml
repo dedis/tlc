@@ -13,6 +13,11 @@ install:
 
 script:
 - go vet ./...
+- if [ "$( gofmt -l . )" ]; then exit 1; fi
 - golint -set_exit_status ./...
 - go test ./...
 - cd spin; ./run.sh
+
+notifications:
+  email: false
+

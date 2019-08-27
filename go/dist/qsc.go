@@ -1,6 +1,6 @@
 package dist
 
-// Witnessed QSC requires three TLC time-steps per consensus round.
+// RoundSteps is three because the witnessed QSC requires three TLC time-steps per consensus round.
 const RoundSteps = 3
 
 // The TLC layer upcalls this method on advancing to a new time-step,

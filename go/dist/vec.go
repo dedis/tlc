@@ -4,14 +4,14 @@ package dist
 type vec []int
 
 // Return a copy of this vector
-func (x vec) copy() vec {
-	return append(vec{}, x...)
+func (v vec) copy() vec {
+	return append(vec{}, v...)
 }
 
 // Return true if vector timestamp x is causally before or equal to y.
-func (x vec) le(y vec) bool {
-	for i := range x {
-		if x[i] > y[i] {
+func (v vec) le(y vec) bool {
+	for i := range v {
+		if v[i] > y[i] {
 			return false
 		}
 	}
@@ -20,12 +20,12 @@ func (x vec) le(y vec) bool {
 
 // Set z to the elementwise maximum of vectors x and y.
 // Inputs x and/or y can be the same as target z.
-func (z vec) max(x, y vec) {
-	for i := range z {
+func (v vec) max(x, y vec) {
+	for i := range v {
 		if x[i] > y[i] {
-			z[i] = x[i]
+			v[i] = x[i]
 		} else {
-			z[i] = y[i]
+			v[i] = y[i]
 		}
 	}
 }
