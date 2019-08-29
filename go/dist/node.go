@@ -4,33 +4,49 @@ import (
 	"sync"
 )
 
-var Threshold int // TLC and consensus threshold
+// Threshold is the TLC and consensus threshold
+var Threshold int
 
-var MaxSteps int
-var MaxTicket int32 = 100 // Amount of entropy in lottery tickets
+// MaxTicket is the Amount of entropy in lottery tickets
+var MaxTicket int32 = 100
 
-type Type int // Type of message
+// Type of message
+type Type int
+
 const (
-	Prop Type = iota // Raw unwitnessed proposal
-	Ack              // Acknowledgment of a proposal
-	Wit              // Threshold witness confirmation of proposal
+	// Prop is a raw unwitnessed proposal
+	Prop Type = iota
+	// Ack is an acknowledgment of a proposal
+	Ack
+	// Wit is a threshold witness confirmation of proposal
+	Wit
 )
 
+// Message over the network
 type Message struct {
 	// Network/peering layer
-	From int // Which node originally sent this message
+
+	// From designates the node which originally sent this message
+	From int
 
 	// Causality layer
-	Seq int // Node-local sequence number for vector time
-	Vec vec // Vector clock update from sender node
+	// Seq is the Node-local sequence number for vector time
+	Seq int
+	// Vev is the Vector clock update from sender node
+	Vec vec
 
 	// Threshold time (TLC) layer
-	Step   int   // Logical time step this message is for
-	Typ    Type  // Message type
-	Prop   int   // Proposal Seq this Ack or Wit is about
-	Ticket int32 // Genetic fitness ticket for this proposal
+	// Step is the logical time step this message is for
+	Step int
+	// typ is the message type
+	Typ Type
+	// Prop is the proposal Seq this Ack or Wit is about
+	Prop int
+	// Ticket is the genetic fitness ticket for this proposal
+	Ticket int32
 }
 
+// Node definition
 type Node struct {
 	// Network/peering layer
 	self  int        // This node's participant number

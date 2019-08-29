@@ -21,9 +21,12 @@ import "math/rand"
 type Type int
 
 const (
-	Raw Type = iota // Raw unwitnessed QSC proposal
-	Ack             // Acknowledgment of a proposal
-	Wit             // Threshold witness confirmation of a proposal
+	// Raw unwitnessed QSC proposal
+	Raw Type = iota
+	// Ack is the acknowledgment of a proposal
+	Ack
+	// Wit is the threshold witness confirmation of a proposal
+	Wit
 )
 
 // Message contains the information nodes must pass in messages
@@ -77,7 +80,7 @@ type Node struct {
 	Rand func() int64 // Function to generate random genetic fitness tickets
 }
 
-// Create and initialize a new Node with the specified group configuration.
+// NewNode creates and initializes a new Node with the specified group configuration.
 // The parameters to NewNode are the mandatory Node configuration parameters:
 // self is this node's number, thres is the TLC message and witness threshold,
 // nnode is the total number of nodes,

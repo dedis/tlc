@@ -1,6 +1,7 @@
 package dist
 
-// Witnessed QSC requires three TLC time-steps per consensus round.
+// RoundSteps is three because the witnessed QSC requires three TLC
+// time-steps per consensus round.
 const RoundSteps = 3
 
 // The TLC layer upcalls this method on advancing to a new time-step,
@@ -36,7 +37,8 @@ func (n *Node) advanceQSC(saw, wit set) {
 
 	// Record the consensus results for this round (from s to s+3).
 	n.choice = append(n.choice, choice{bestProp.From, committed})
-	//println(n.self, n.tmpl.Step, "choice", bestProp.From, "spoiled", spoiled, "reconfirmed", reconfirmed, "committed", committed)
+	//println(n.self, n.tmpl.Step, "choice", bestProp.From, "spoiled", spoiled,
+	// "reconfirmed", reconfirmed, "committed", committed)
 
 	// Don't bother saving history before the start of the next round.
 	n.save = s + 1

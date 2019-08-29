@@ -82,7 +82,6 @@ func (n *Node) receiveCausal(msg *Message) {
 		println(n.self, n.tmpl.Step, "duplicate message from", msg.From,
 			"seq", msg.Seq)
 		panic("XXX")
-		return
 	}
 
 	// Enqueue broadcast message for delivery in causal order.

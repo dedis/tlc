@@ -23,14 +23,17 @@ import (
 	"time"
 )
 
+// MaxSteps to take
+var MaxSteps int
+
 // Maximum random delays to add to message deliveries for testing
 var MaxSleep time.Duration
 
 // Whether to run consensus among multiple separate processes
-var MultiProcess bool = true
+var MultiProcess = true
 
 // Whether to use TLS encryption and authentication atop TCP
-var UseTLS bool = true
+var UseTLS = true
 
 // Information about each virtual host passed to child processes via JSON
 type testHost struct {
@@ -127,7 +130,7 @@ func testExec(t *testing.T, threshold, nnodes int) {
 	for i := range host {
 
 		childGroup.Add(1)
-		childIn, childOut := testExecChild(t, &conf[i], ctx, childGroup)
+		childIn, childOut := testExecChild(ctx, &conf[i], t, childGroup)
 
 		// We'll communicate with the child via JSON-encoded stdin/out
 		enc[i] = json.NewEncoder(childIn)
@@ -175,7 +178,7 @@ func testExec(t *testing.T, threshold, nnodes int) {
 }
 
 // Exec a child as a separate process.
-func testExecChild(t *testing.T, conf *testConfig, ctx context.Context,
+func testExecChild(ctx context.Context, conf *testConfig, t *testing.T,
 	grp *sync.WaitGroup) (io.Writer, io.Reader) {
 
 	if !MultiProcess {
@@ -377,14 +380,6 @@ func testChild(in io.Reader, out io.Writer) {
 		}
 	}
 
-	// Configure TLS
-	tlsConf := &tls.Config{
-		RootCAs:      pool,
-		Certificates: []tls.Certificate{tlscert},
-		ServerName:   conf.HostName,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    pool,
-	}
 	//println("hostName", conf.HostName, "pool", len(pool.Subjects()))
 
 	// Listen and accept TCP/TLS connections
@@ -399,7 +394,13 @@ func testChild(in io.Reader, out io.Writer) {
 
 			// Launch a goroutine to process it
 			donegrp.Add(1)
-			go n.acceptNetwork(tcpc, tlsConf, host, donegrp)
+			go n.acceptNetwork(tcpc, &tls.Config{
+				RootCAs:      pool,
+				Certificates: []tls.Certificate{tlscert},
+				ServerName:   conf.HostName,
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				ClientCAs:    pool,
+			}, host, donegrp)
 		}
 	}()
 
@@ -408,7 +409,13 @@ func testChild(in io.Reader, out io.Writer) {
 	stepgrp := &sync.WaitGroup{}
 	for i := range host {
 		// Open an authenticated TLS connection to peer i
-		peerConf := *tlsConf
+		peerConf := tls.Config{
+			RootCAs:      pool,
+			Certificates: []tls.Certificate{tlscert},
+			ServerName:   conf.HostName,
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			ClientCAs:    pool,
+		}
 		peerConf.ServerName = host[i].Name
 		//println(self, "Dial", host[i].Name, host[i].Addr)
 		var conn net.Conn
