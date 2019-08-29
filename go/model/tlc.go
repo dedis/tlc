@@ -37,7 +37,8 @@ func (n *Node) Advance() {
 	n.broadcastTLC() // broadcast our raw proposal
 }
 
-// Receive is called by the client or network layer on receipt of a Message from a peer.
+// Receive is called by the client or network layer on receipt of a Message
+// from a peer.
 // Any unmarshaling that may be required must have already been done.
 //
 // This function assumes that peer-to-peer connections are ordered and reliable,

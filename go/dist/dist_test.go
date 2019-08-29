@@ -178,7 +178,8 @@ func testExec(t *testing.T, threshold, nnodes int) {
 }
 
 // Exec a child as a separate process.
-func testExecChild(ctx context.Context, conf *testConfig, t *testing.T, grp *sync.WaitGroup) (io.Writer, io.Reader) {
+func testExecChild(ctx context.Context, conf *testConfig, t *testing.T,
+	grp *sync.WaitGroup) (io.Writer, io.Reader) {
 
 	if !MultiProcess {
 		// Run a child as a separate goroutine in the same process.
