@@ -4,6 +4,8 @@ This repository contains multiple prototype implementations of
 
 [![Build Status](https://travis-ci.com/dedis/tlc.svg?branch=master)](https://travis-ci.com/dedis/tlc)
 
+A preliminary paper is available here: https://arxiv.org/abs/1907.07010
+
 * [go/model](go/model/) contains a minimalistic "model" implementation
   of TLC and QSC in Go, which illustrates the key concepts
   using goroutines and shared memory communication for simplicity.
