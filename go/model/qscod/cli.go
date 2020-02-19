@@ -42,23 +42,21 @@ type Store interface {
 type Client struct {
 	tr, ts int     // TLCB thresholds
 	kv         []Store // Node state key/value stores
+	rv func() int64 // Function to generate random priority values
 
 	mut  sync.Mutex
 	cond *sync.Cond
 
 	msg string               // message we want to commit, "" if none
 	kvc map[Step]map[Node]Val // cache of key/value store values
-
-	rv func() int64 // Function to generate random priority values
+	stop bool
 }
 
 func (c *Client) Start(tr, ts int, kv []Store, rv func() int64) {
-	c.tr, c.ts, c.kv = tr, ts, kv
+	c.tr, c.ts, c.kv, c.rv = tr, ts, kv, rv
 
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Val)
-
-	c.rv = rv
 
 	for i := range kv {
 		go c.thread(Node(i))
@@ -77,7 +75,7 @@ func (c *Client) Commit(msg string) {
 
 func (c *Client) Stop() {
 	c.mut.Lock()
-	c.kv = nil		// signal all threads that client is stopping
+	c.stop = true		// signal all threads that client is stopping
 	c.cond.Broadcast()
 	c.mut.Unlock()
 }
@@ -86,17 +84,20 @@ func (c *Client) thread(node Node) {
 	c.mut.Lock()
 	s := Step(0)
 	h := &Hist{}
-	for c.kv != nil {	// We set kv = nil to stop the client
+	for !c.stop {
 		for c.msg == "" {	// If nothing to do, wait for work
 			c.cond.Wait()
 		}
+		//println("thread", node, "got msg:", c.msg)
 
 		v0 := Val{H: h, Hp: &Hist{node, h, c.msg, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
+		h = v0.H	// correct our state from v0 read
 
 		v2 := Val{R: R0, B: B0}
-		v2.H, _ = B0.best()
+		v2.Hp, _ = B0.best()
 		v2, R2, B2 := c.tlcb(node, s+2, v2)
+		R0, B0 = v2.R, v2.B	// correct our state from v2 read
 
 		h, _ = R2.best()
 		if b, u := R0.best(); B2[h.node] == h && b == h && u {
@@ -106,6 +107,7 @@ func (c *Client) thread(node Node) {
 
 		s += 4
 	}
+	c.mut.Unlock()
 }
 
 func (c *Client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
@@ -136,6 +138,7 @@ func (c *Client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
 		c.kvc[s] = make(map[Node]Val)
 	}
 	v = c.kv[node].WriteRead(s, v)
+	c.kvc[s][node] = v
 	if len(c.kvc[s]) == c.tr {
 		c.cond.Broadcast()
 	}
