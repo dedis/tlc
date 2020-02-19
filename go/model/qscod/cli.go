@@ -1,7 +1,6 @@
 package qscod
 
 import (
-	"math/rand"
 	"sync"
 )
 
@@ -21,8 +20,7 @@ func (S Set) best() (*Hist, bool) {
 	b, u := &Hist{pri: -1}, false
 	for _, h := range S {
 		if h.pri >= b.pri {
-			u = !(h.pri == b.pri)
-			b = h
+			b, u = h, !(h.pri == b.pri)
 		}
 	}
 	return b, u
@@ -42,7 +40,7 @@ type Store interface {
 }
 
 type Client struct {
-	tr, tb, ts int     // TLCB thresholds
+	tr, ts int     // TLCB thresholds
 	kv         []Store // Node state key/value stores
 
 	mut  sync.Mutex
@@ -51,30 +49,49 @@ type Client struct {
 	msg string               // message we want to commit, "" if none
 	kvc map[Step]map[Node]Val // cache of key/value store values
 
-	Deliver func(*Hist)
+	rv func() int64 // Function to generate random priority values
 }
 
-func (c *Client) Init(tr, tb, ts int, kv []Store) {
-	c.tr, c.tb, c.ts, c.kv = tr, tb, ts, kv
+func (c *Client) Start(tr, ts int, kv []Store, rv func() int64) {
+	c.tr, c.ts, c.kv = tr, ts, kv
 
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Val)
+
+	c.rv = rv
 
 	for i := range kv {
 		go c.thread(Node(i))
 	}
 }
 
+func (c *Client) Commit(msg string) {
+	c.mut.Lock()
+	c.msg = msg		// give the client threads some work to do
+	c.cond.Broadcast()
+	for c.msg == msg {
+		c.cond.Wait()
+	}
+	c.mut.Unlock()
+}
+
+func (c *Client) Stop() {
+	c.mut.Lock()
+	c.kv = nil		// signal all threads that client is stopping
+	c.cond.Broadcast()
+	c.mut.Unlock()
+}
+
 func (c *Client) thread(node Node) {
 	c.mut.Lock()
 	s := Step(0)
 	h := &Hist{}
-	for {
-		for c.msg == "" {
+	for c.kv != nil {	// We set kv = nil to stop the client
+		for c.msg == "" {	// If nothing to do, wait for work
 			c.cond.Wait()
 		}
 
-		v0 := Val{H: h, Hp: &Hist{node, h, c.msg, rand.Int63()}}
+		v0 := Val{H: h, Hp: &Hist{node, h, c.msg, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 
 		v2 := Val{R: R0, B: B0}
@@ -83,7 +100,8 @@ func (c *Client) thread(node Node) {
 
 		h, _ = R2.best()
 		if b, u := R0.best(); B2[h.node] == h && b == h && u {
-			c.Deliver(h)
+			c.msg = ""
+			c.cond.Broadcast()
 		}
 
 		s += 4
