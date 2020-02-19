@@ -9,6 +9,7 @@ type Step int64
 
 type Hist struct {
 	node Node
+	step Step
 	pred *Hist
 	msg  string
 	pri  int64
@@ -48,6 +49,8 @@ type Client struct {
 	cond *sync.Cond
 
 	msg string               // message we want to commit, "" if none
+	msgh *Hist		// history when message committed
+
 	kvc map[Step]map[Node]Val // cache of key/value store values
 	stop bool
 }
@@ -63,14 +66,16 @@ func (c *Client) Start(tr, ts int, kv []Store, rv func() int64) {
 	}
 }
 
-func (c *Client) Commit(msg string) {
+func (c *Client) Commit(msg string) *Hist {
 	c.mut.Lock()
 	c.msg = msg		// give the client threads some work to do
 	c.cond.Broadcast()
 	for c.msg == msg {
 		c.cond.Wait()
 	}
+	h := c.msgh
 	c.mut.Unlock()
+	return h
 }
 
 func (c *Client) Stop() {
@@ -83,14 +88,14 @@ func (c *Client) Stop() {
 func (c *Client) thread(node Node) {
 	c.mut.Lock()
 	s := Step(0)
-	h := &Hist{}
+	h := (*Hist)(nil)		// First proposal has no predecessor
 	for !c.stop {
 		for c.msg == "" {	// If nothing to do, wait for work
 			c.cond.Wait()
 		}
 		//println("thread", node, "got msg:", c.msg)
 
-		v0 := Val{H: h, Hp: &Hist{node, h, c.msg, c.rv()}}
+		v0 := Val{H: h, Hp: &Hist{node, s, h, c.msg, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 		h = v0.H	// correct our state from v0 read
 
@@ -100,8 +105,9 @@ func (c *Client) thread(node Node) {
 		R0, B0 = v2.R, v2.B	// correct our state from v2 read
 
 		h, _ = R2.best()
-		if b, u := R0.best(); B2[h.node] == h && b == h && u {
+		if b, u := R0.best(); B2[h.node] == h && b == h && u && h.msg == c.msg {
 			c.msg = ""
+			c.msgh = h
 			c.cond.Broadcast()
 		}
 
