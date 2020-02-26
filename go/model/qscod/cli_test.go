@@ -1,31 +1,39 @@
 package qscod
 
-import (
-	"fmt"
-	"sync"
-	"testing"
-	"math/rand"
-)
+import "fmt"
+import "math/rand"
+import "sync"
+import "testing"
 
 // Trivial intra-process key-value store implementation for testing
 type testStore struct {
-	kv map[Step]Val
+	kv  map[Step]Val
 	mut sync.Mutex
+}
+
+// WriteRead implements the Store interface with a simple intra-process map.
+func (ts *testStore) WriteRead(s Step, v Val) Val {
+	ts.mut.Lock()
+	if _, ok := ts.kv[s]; !ok { // no client wrote a value yet for s?
+		ts.kv[s] = v // write-once
+	}
+	v = ts.kv[s] // Read the winning value in any case
+	ts.mut.Unlock()
+	return v
 }
 
 // Object to record the common total order and verify it for consistency
 type testOrder struct {
-	hs []*Hist		// all history known to be committed so far
-	mut sync.Mutex
+	hs  []*Hist    // all history known to be committed so far
+	mut sync.Mutex // mutex protecting this reference order
 }
 
+// When a Client reports a history h has been committed,
+// record that in the testOrder and check it for global consistency.
 func (to *testOrder) committed(t *testing.T, h *Hist) {
-	if int(h.step/4) >= len(to.hs) {
+	if int(h.step/4) >= len(to.hs) { // one new proposal every 4 steps
 		if h.pred != nil {
-			to.committed(t, h.pred)	// first check h's predecessor
-		}
-		if int(h.step/4) != len(to.hs) {
-			panic("out of sync")
+			to.committed(t, h.pred) // first check h's predecessor
 		}
 		to.hs = append(to.hs, h)
 	}
@@ -35,38 +43,34 @@ func (to *testOrder) committed(t *testing.T, h *Hist) {
 	}
 }
 
+// testCli creates a test Client with particular configuration parameters.
+func testCli(t *testing.T, self, nfail, ncom, maxpri int,
+	kv []Store, to *testOrder, wg *sync.WaitGroup) {
 
-func (ts *testStore) WriteRead(s Step, v Val) Val {
-	ts.mut.Lock()
-	if _, ok := ts.kv[s]; !ok {
-		ts.kv[s] = v		// Write-once
-	}
-	v = ts.kv[s]			// Read
-	ts.mut.Unlock()
-	return v
-}
+	c := &Client{} // Create a new Client
+	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
 
-func testCli(t *testing.T, self, nfail, ncom, maxTicket int,
-		kv []Store, to *testOrder, wg *sync.WaitGroup) {
-	c := &Client{}
-	rv := func() int64 {
-		return rand.Int63n(int64(maxTicket))
-	}
+	// Start the test Client with appropriate parameters assuming
+	// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
 	c.Start(2*nfail, nfail+1, kv, rv)
+
+	// Commit ncom messages, and consistency-check each commitment.
 	for i := 0; i < ncom; i++ {
 		h := c.Commit(fmt.Sprintf("cli %v commit %v", self, i))
 		to.mut.Lock()
-		to.committed(t, h)
+		to.committed(t, h) // consistency-check history h
 		to.mut.Unlock()
 	}
+
+	// Stop the test Client
 	c.Stop()
 	wg.Done()
 }
 
 //  Run a consensus test case with the specified parameters.
-func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxTicket int) {
+func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 	desc := fmt.Sprintf("F=%v,N=%v,Clients=%v,Commits=%v,Tickets=%v",
-		nfail, nnode, ncli, ncommits, maxTicket)
+		nfail, nnode, ncli, ncommits, maxpri)
 	t.Run(desc, func(t *testing.T) {
 
 		// Create a test key/value store representing each node
@@ -83,35 +87,22 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxTicket int) {
 		wg := &sync.WaitGroup{}
 		for i := range cli {
 			wg.Add(1)
-			go testCli(t, i, nfail, ncommits, maxTicket, kv, to, wg)
+			go testCli(t, i, nfail, ncommits, maxpri, kv, to, wg)
 		}
 		wg.Wait()
-
-		// testResults(t, all) // Report test results
 	})
 }
 
 func TestClient(t *testing.T) {
-	//testRun(t, 0, 1, 1, 100000, 100) // Trivial case: 1 of 1 consensus!
-	//testRun(t, 0, 1, 10, 100000, 100)
-	//testRun(t, 0, 2, 1, 100000, 100) // Another trivial case: 2 of 2
-	//testRun(t, 0, 2, 10, 100000, 100)
-
-	testRun(t, 1, 3, 1, 1000, 100)  // Standard f=1 case
+	testRun(t, 1, 3, 1, 1000, 100) // Standard f=1 case
 	testRun(t, 1, 3, 10, 1000, 100)
 	testRun(t, 1, 3, 20, 1000, 100)
 	testRun(t, 2, 6, 10, 1000, 100)  // Standard f=2 case
-	testRun(t, 3, 9, 10, 1000, 100)   // Standard f=3 case
-	testRun(t, 4, 12, 10, 1000, 100)   // Standard f=4 case
+	testRun(t, 3, 9, 10, 1000, 100)  // Standard f=3 case
+	testRun(t, 4, 12, 10, 1000, 100) // Standard f=4 case
 	testRun(t, 5, 15, 10, 1000, 100) // Standard f=10 case
 
-	//testRun(t, 0, 3, 10, 1000, 100) // Less-than-maximum faulty nodes
-	//testRun(t, 1, 7, 10, 1000, 100)
-	//testRun(t, 2, 10, 10, 1000, 100)
-
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
-	//testRun(t, 1, 3, 10, 1000, 1) // Limit case: will never commit
 	testRun(t, 1, 3, 10, 1000, 2) // Extreme low-entropy: rarely commits
 	testRun(t, 1, 3, 10, 1000, 3) // A bit better bit still bad...
 }
-
