@@ -9,13 +9,9 @@
 
 % qsc(C) -> (never returns)
 % Implements Que Sera Co nsensus (QSC) atop TLCB and TLCR.
-% TLC state S as a pair {Ct, Rp} where Ct is a time-step counter
-% and Rp is the receive-set R that concluded the previous step.
-qsc(C) ->
-	qsc(C, {1, []}, #hist{step=0}).
-qsc(#config{node=I, choose=Ch, random=Rv, deliver=D} = C, {Ct, _} = S0, H0) ->
-
-	H1 = #hist{step=Ct, node=I, msg=Ch(C, Ct), pri=Rv(), pred=H0},
+qsc(C) -> qsc(C, 1, #hist{step=0}).	% start at step 1 with placeholder pred
+qsc(#config{node=I, choose=Ch, random=Rv, deliver=D} = C, S0, H0) ->
+	H1 = #hist{step=S0, node=I, msg=Ch(C, S0), pri=Rv(), pred=H0},
 	{S1, R1, B1} = tlcb(C, S0, H1),	% Try to broadcast (confirm) proposal
 	{H2, _} = best(B1),		% Choose some best eligible proposal
 	{S2, R2, B2} = tlcb(C, S1, H2),	% Re-broadcast it to reconfirm proposal
@@ -54,25 +50,25 @@ count(LL, H) ->
 
 % tlcr(C, S, M) -> {S, R, nil}
 % Implements the TLCR algorithm for receive-threshold synchronous broadcast.
-tlcr(#config{pids=Pids} = C, {Ct, Rp} = S, M) ->
-	[P ! {M, Ct, Rp} || P <- Pids],		% broadcast next message
+tlcr(#config{pids=Pids} = C, S, M) ->
+	[P ! {S, M} || P <- Pids],		% broadcast next message
 	tlcr_wait(C, S, []).			% wait for receive threshold
-tlcr_wait(#config{tr=Tr} = C, {Ct, _} = S, R) when length(R) < Tr ->
-	receive	{JM, JCt, _} when JCt == Ct -> tlcr_wait(C, S, [JM | R]);
-		{_, JCt, JRp} when JCt > Ct -> {{Ct+1, JRp}, JRp, nil}
-	end;
-tlcr_wait(_, {Ct, _}, R) -> {{Ct+1, R}, R, nil}.
+tlcr_wait(#config{tr=Tr} = C, S, R) when length(R) < Tr ->
+	receive	{RS, RM} when RS == S -> tlcr_wait(C, S, [RM | R]);
+		{RS, _} when RS < S -> tlcr_wait(C, S, R)	% drop old msgs
+	end;	% when RS > S message stays in the inbox to be received later
+tlcr_wait(_, S, R) -> {S+1, R, nil}.
 
 
 % Run a test-case configured for a given number of potentially-failing nodes F,
 % then signal Parent process when done.
-test(F, Parent) ->
+test(F, Parent, Steps) ->
 	% Generate a standard valid configuration from number of failures F.
 	N = 3*F, Tr = 2*F, Tb = F, Ts = F+1,
 	io:fwrite("Test N=~p F=~p~n", [N, F]),
 
 	% Function to choose message for node I to propose at TLC time-step S.
-	Choose = fun(#config{node=I}, Ct) -> {msg, Ct, I} end,
+	Choose = fun(#config{node=I}, S) -> {msg, S, I} end,
 
 	% Choose a random value to attach to a proposal in time-step S.
 	% This low-entropy random distribution is intended only for testing,
@@ -82,8 +78,8 @@ test(F, Parent) ->
 	Random = fun() -> rand:uniform(N) end,
 
 	% The nodes will "deliver" histories by sending them back to us.
-	Tester = self(),		% Save PID of the master process
-	Deliver = fun(C, {Ct, _}, H) -> Tester ! {Ct, C#config.node, H} end,
+	Tester = self(),		% Save our PID for nodes to send to
+	Deliver = fun(C, S, H) -> Tester ! {S, C#config.node, H} end,
 
 	% Receive a config record C and run QSC with that configuration.
 	RunQSC = fun() -> receive C -> qsc(C) end end,
@@ -97,12 +93,12 @@ test(F, Parent) ->
 	[lists:nth(I, Pids) ! C#config{node=I} || I <- lists:seq(1, N)],
 
 	% Wait until the test has completed a certain number of time-steps.
-	test_wait(Parent, Pids, 100, #hist{step=0}).
+	test_wait(Parent, Pids, Steps, #hist{step=0}).
 
 % Wait for a test to finish and consistency-check the results it commits
 test_wait(Parent, Pids, Steps, Hp) ->
-	receive	{Ct, I, H} when Ct < Steps ->
-			io:fwrite("~p at ~p committed ~P~n", [I, Ct, H, 8]),
+	receive	{S, I, H} when S < Steps ->
+			io:fwrite("~p at ~p committed ~P~n", [I, S, H, 8]),
 			test_wait(Parent, Pids, Steps, test_check(Hp, H));
 		{_, _, _} ->
 			[exit(P, kill) || P <- Pids],	% stop all our nodes
@@ -122,7 +118,7 @@ test_check(A, B) -> io:fwrite("UNSAFE ~P /= ~P", [A, 8, B, 8]), A.
 tests() ->
 	Self = self(),				% Save main process's PID
 	Test = fun(F) -> 			% Function to run a test case
-		Run = fun() -> test(F, Self) end,
+		Run = fun() -> test(F, Self, 1000) end,
 		spawn(Run),			% Spawn a tester process
 		receive {} -> {} end		% Wait until tester child done
 	end,
