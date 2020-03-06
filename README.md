@@ -1,21 +1,50 @@
 
 This repository contains multiple prototype implementations of
-[Threshold Logical Clocks (TLC) and Que Sera Consensus (QSC)](https://arxiv.org/abs/1907.07010).
+Threshold Logical Clocks (TLC) and Que Sera Consensus (QSC),
+as described in the following papers:
 
-[![Build Status](https://travis-ci.com/dedis/tlc.svg?branch=master)](https://travis-ci.com/dedis/tlc)
+* [Threshold Logical Clocks for Asynchronous Distributed Coordination and Consensus](https://arxiv.org/abs/1907.07010)
+* [Que Sera Consensus: Simple Asynchronous Agreement with Private Coins and Threshold Logical Clocks](https://arxiv.org/abs/2003.02291)
 
-* [go/model](go/model/) contains a minimalistic "model" implementation
-  of TLC and QSC in Go, which illustrates the key concepts
+The following prototype implementations of TLC and QSC are available
+in multiple languages:
+
+* [erlang/model](erlang/model/) contains a minimalistic model implementation
+  of the QSC, TLCB, and TLCR algorithms detailed in the
+  [new QSC preprint](https://arxiv.org/abs/2003.02291).
+  This model implements QSC using Erlang processes and communication 
+  on a single machine for illustrative simplicity, although
+  [distributed Erlang](https://erlang.org/doc/reference_manual/distributed.html)
+  should make it straightforward to extend this model
+  to true distributed consensus.
+  Erlang's [selective receive](https://ndpar.blogspot.com/2010/11/erlang-explained-selective-receive.html)
+  is particularly well-suited to implementing TLCR concisely.
+  The model consists of only 73 lines of code
+  as measured by [cloc](https://github.com/AlDanial/cloc),
+  including test code,
+  or only 37 lines comprising the consensus algorithm alone.
+
+* [go/model](go/model/) contains a minimalistic model implementation in Go
+  of TLC and QSC as described in the
+  [original TLC preprint](https://arxiv.org/abs/1907.07010).
+  This model illustrates the key concepts
   using goroutines and shared memory communication for simplicity.
   It is not useful in an actual distributed context,
-  but being less than 250 code lines long
+  but being less than 200 code lines long
   as measured by [cloc](https://github.com/AlDanial/cloc),
   it is ideal for studying and understanding TLC and QSC.
-  Playing with or porting this model implementation to some other language may
-  be a good way to get a handle on the fundamentals.
 
-* [go/dist](go/dist/) contains a simple but functional
-  "real" distributed implementation of TLC and QSC
+* [go/model/qscod](go/model/qscod/)
+  contains a model implementation in Go of QSCOD,
+  the client-driven "on-demand" consensus algorithm outlined in the 
+  [new QSC preprint](https://arxiv.org/abs/2003.02291).
+  This formulation of QSC consumes no bandwidth or computation
+  when there is no work to be done (hence on-demand),
+  and incurs only <i>O(n<sup>2</sup>)</i> communication complexity
+  per client-driven agreement.
+
+* [go/dist](go/dist/) contains a simple but working
+  "real" distributed implementation of TLC and QSC in Go
   for a fail-stop (Paxos-like) threat model.
   It uses TCP, TLS encryption and authentication,
   and Go's native Gob encoding for inter-node communication.
@@ -32,4 +61,6 @@ This repository contains multiple prototype implementations of
 
 All of this code is still extremely early and experimental;
 use at your own risk.
+
+[![Build Status](https://travis-ci.com/dedis/tlc.svg?branch=master)](https://travis-ci.com/dedis/tlc)
 
