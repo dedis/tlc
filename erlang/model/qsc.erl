@@ -112,7 +112,7 @@ test_check(#hist{step=AC,pred=AP} = A, #hist{step=BC} = B) when AC > BC ->
 test_check(#hist{step=AC} = A, #hist{step=BC,pred=BP} = B) when BC > AC ->
 	test_check(A, BP), B;		% compare A with shorter prefix of B
 test_check(A, B) when A == B -> A;
-test_check(A, B) -> io:fwrite("UNSAFE ~P /= ~P", [A, 8, B, 8]), A.
+test_check(A, B) -> erlang:error({inconsistency, A, B}).
 
 % Run QSC and TLC through a test suite.
 tests() ->
