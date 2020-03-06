@@ -1,2 +1,2 @@
 #!/bin/sh
-erl -make && erl -noshell -run qsc tests -run init stop
+erl -make && erl -noshell -run qsc test -run init stop
