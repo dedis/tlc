@@ -54,7 +54,7 @@ in multiple languages:
   of asynchronous consensus around.
 
 * [spin](spin/) contains a simple Promela model of the core of TLC and QSC
-  for the [Spin model checker](http://spinroot.com/spin/whatispin.html).
+  for the [Spin model checker](https://spinroot.com/spin/whatispin.html).
   Although this implementation models TLC and QSC only at a
   very high, abstract level, it captures the basic logic enough
   to lend confidence to the correctness of the algorithm.
