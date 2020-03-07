@@ -106,7 +106,8 @@ test_run(F, Steps) ->
 
 % Receive a node configuration, run a QSC node simulation with it,
 % then send a completion signal to our parent process.
-test_node(Parent) -> receive C -> qsc(C), Parent ! {done, C#config.nn} end.
+test_node(Parent) ->
+	receive #config{} = C -> qsc(C), Parent ! {done, C#config.nn} end.
 
 % Wait to receive a signal that node I is finished.
 test_wait(I) -> receive {done, I} -> {} end.
@@ -115,7 +116,7 @@ test_wait(I) -> receive {done, I} -> {} end.
 % Receive committed histories from all nodes and consistency-check them
 test_checker(Hp) ->
 	receive	{check, S, I, H} ->
-			%io:fwrite("~p at ~p committed ~P~n", [I, S, H, 8]),
+			io:fwrite("at ~p node ~p committed ~P~n", [S, I, H, 8]),
 			test_checker(test_check(Hp, H));
 		{stop} -> {}
 	end.
