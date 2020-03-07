@@ -70,7 +70,7 @@ tlcr_wait(_, S, R) -> {S+1, R, nil}.
 
 % Run a test-case configured for a given number of potentially-failing nodes F,
 % then signal Parent process when done.
-test_run(F, Parent, Steps) ->
+test_run(F, Steps) ->
 	% Generate a standard valid configuration from number of failures F.
 	N = 3*F, Tr = 2*F, Tb = F, Ts = F+1,
 	io:fwrite("Test N=~p F=~p~n", [N, F]),
@@ -85,31 +85,39 @@ test_run(F, Parent, Steps) ->
 	% maximum efficiency and strength against intelligent DoS attackers.
 	Random = fun() -> rand:uniform(N) end,
 
-	% The nodes will "deliver" histories by sending them back to us.
-	Tester = self(),		% Save our PID for nodes to send to
-	Deliver = fun(C, S, H) -> Tester ! {S, C#config.nn, H} end,
+	% Spawn a process to receive and consistency-check committed histories.
+	Checker = spawn(fun() -> test_checker(#hist{step=0}) end),
 
-	% Receive a config record C, run QSC with that configuration,
-	% and send us a message when the node completes Steps time-steps.
-	RunQSC = fun() -> receive C -> qsc(C), Tester ! {done} end end,
+	% The nodes will "deliver" histories by sending them back to us.
+	Deliver = fun(C, S, H) -> Checker ! {check, S, C#config.nn, H} end,
 
 	% Launch a process representing each of the N nodes.
-	Pids = [spawn(RunQSC) || _ <- lists:seq(1, N)],
+	Self = self(),
+	Pids = [spawn(fun() -> test_node(Self) end) || _ <- lists:seq(1, N)],
 
 	% Send each node its complete configuration record to get it started.
 	C = #config{ tr = Tr, tb = Tb, ts = Ts, pids = Pids, steps = Steps,
 		choose = Choose, random = Random, deliver = Deliver},
 	[lists:nth(I, Pids) ! C#config{nn=I} || I <- lists:seq(1, N)],
 
-	% Wait until the test has completed a certain number of time-steps.
-	test_wait(Parent, Pids, #hist{step=0}).
+	% Wait until all nodes run the designated number of time steps.
+	[test_wait(I) || I <- lists:seq(1, N)],
+	Checker ! {stop}.		% Terminate our checker process
 
-% Wait for a test to finish and consistency-check the results it commits
-test_wait(Parent, Pids, Hp) ->
-	receive	{S, I, H} ->
+% Receive a node configuration, run a QSC node simulation with it,
+% then send a completion signal to our parent process.
+test_node(Parent) -> receive C -> qsc(C), Parent ! {done, C#config.nn} end.
+
+% Wait to receive a signal that node I is finished.
+test_wait(I) -> receive {done, I} -> {} end.
+
+% test_checker() -> {}
+% Receive committed histories from all nodes and consistency-check them
+test_checker(Hp) ->
+	receive	{check, S, I, H} ->
 			%io:fwrite("~p at ~p committed ~P~n", [I, S, H, 8]),
-			test_wait(Parent, Pids, test_check(Hp, H));
-		{done} -> Parent ! {}     		% signal test is done
+			test_checker(test_check(Hp, H));
+		{stop} -> {}
 	end.
 
 % test_check(A, B) -> H
@@ -123,12 +131,6 @@ test_check(A, B) -> erlang:error({inconsistency, A, B}).
 
 % Run QSC and TLC through a test suite.
 test() ->
-	Self = self(),				% Save main process's PID
-	Test = fun(F) -> 			% Function to run a test case
-		Run = fun() -> test_run(F, Self, 1000) end,
-		spawn(Run),			% Spawn a tester process
-		receive {} -> {} end		% Wait until tester child done
-	end,
-	[Test(F) || F <- [1,2,3,4,5]],		% Test several configurations
+	[test_run(F, 1000) || F <- [1,2,3,4,5]],	% simple test suite
 	io:fwrite("Tests completed~n").
 
