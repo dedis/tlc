@@ -10,7 +10,7 @@
 % steps: maximum number of time steps to run, nil to run forever
 % choose: function choose(Config, Step) -> Msg to choose application message
 % random: function random() -> Value to choose a random priority value
-% deliver: function deliver(Config, Step, History) to deliver a final history
+% deliver: function deliver(History) to deliver a committed history
 -record(config, {nn, tr, tb, ts, pids, steps, choose, random, deliver}).
 
 % A history is a record representing the most recent in a chain.
@@ -28,7 +28,7 @@ qsc(#config{nn=I, choose=Ch, random=Rv, deliver=D} = C, S0, H0) ->
 	{Hn, _} = best(R2),		% Choose best eligible for next round
 	{H3, Unique} = best(R1),	% What is the best potential history?
 	Final = lists:member(Hn, B2) and (Hn == H3) and Unique,
-	if	Final -> D(C, S2, Hn), qsc(C, S2, Hn);	% Deliver history Hn
+	if	Final -> D(Hn), qsc(C, S2, Hn);		% Deliver history Hn
 		true -> qsc(C, S2, Hn)	% Just proceed to next consensus round
 	end.
 
@@ -89,7 +89,7 @@ test_run(F, Steps) ->
 	Checker = spawn(fun() -> test_checker(#hist{step=0}) end),
 
 	% The nodes will "deliver" histories by sending them back to us.
-	Deliver = fun(C, S, H) -> Checker ! {check, S, C#config.nn, H} end,
+	Deliver = fun(H) -> Checker ! {check, H} end,
 
 	% Launch a process representing each of the N nodes.
 	Self = self(),
@@ -115,8 +115,8 @@ test_wait(I) -> receive {done, I} -> {} end.
 % test_checker() -> {}
 % Receive committed histories from all nodes and consistency-check them
 test_checker(Hp) ->
-	receive	{check, S, I, H} ->
-			io:fwrite("at ~p node ~p committed ~P~n", [S, I, H, 8]),
+	receive	{check, H} ->
+			%io:fwrite("committed ~P~n", [H, 8]),
 			test_checker(test_check(Hp, H));
 		{stop} -> {}
 	end.
