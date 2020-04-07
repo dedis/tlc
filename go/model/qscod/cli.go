@@ -50,18 +50,13 @@ type Val struct {
 // to the consensus group and driving the QSC/TLC state machine forward
 // asynchronously across the n key/value stores.
 type Client struct {
-	tr, ts int          // TLCB thresholds
-	kv     []Store      // Node state key/value stores
-	rv     func() int64 // Function to generate random priority values
-
-	mut  sync.Mutex     // Mutex protecting the state of this client
-	cond *sync.Cond     // For threads to await threshold conditions
-	wg   sync.WaitGroup // For synchronizing client thread termination
-
-	kvc  map[Step]map[Node]Val // Cache of key/value store values
-	pref string                // preferred value we'd like to commit
-	preh *Hist                 // Previous history we want to build on
-	comh *Hist                 // Last committed history
+	tr, ts int                   // TLCB thresholds
+	kv     []Store               // Node state key/value stores
+	rv     func() int64          // Function to generate random priorities
+	mut    sync.Mutex            // Mutex protecting this client's state
+	cond   *sync.Cond            // For awaiting threshold conditions
+	kvc    map[Step]map[Node]Val // Cache of key/value store values
+	comh   *Hist                 // Last committed history
 }
 
 // Commit starts a Client with given configuration parameters,
@@ -70,7 +65,7 @@ type Client struct {
 // Returns the history that successfully committed msg.
 func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
 	pref string, preh *Hist) *Hist {
-	c.tr, c.ts, c.kv, c.rv, c.pref, c.preh = tr, ts, kv, rv, pref, preh
+	c.tr, c.ts, c.kv, c.rv = tr, ts, kv, rv
 
 	// Initialize the client's synchronization and key/value cache state.
 	c.cond = sync.NewCond(&c.mut)
@@ -78,17 +73,22 @@ func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
 
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
-		c.wg.Add(1)
-		go c.thread(Node(i), preh.step+4, preh)
+		go c.thread(Node(i), pref, preh.step+4, preh)
 	}
-	c.wg.Wait()
+
+	// Wait for some thread to discover the next committed history
+	c.mut.Lock()
+	for c.comh == nil {
+		c.cond.Wait()
+	}
+	c.mut.Unlock()
 
 	return c.comh // Return next committed history we learned
 }
 
 // thread represents the main loop of a Client's thread
 // that represents and drives a particular consensus group node.
-func (c *Client) thread(node Node, s Step, h *Hist) {
+func (c *Client) thread(node Node, pref string, s Step, h *Hist) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 
 	// Run until we find a commitment at a sufficiently high step number,
@@ -99,7 +99,7 @@ func (c *Client) thread(node Node, s Step, h *Hist) {
 		// Prepare a proposal containing the message msg
 		// that this Client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Val{H: h, Hp: &Hist{node, s, h, c.pref, c.rv()}}
+		v0 := Val{H: h, Hp: &Hist{node, s, h, pref, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 		h = v0.H // correct our state from v0 read
 
@@ -115,13 +115,13 @@ func (c *Client) thread(node Node, s Step, h *Hist) {
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
 		if B2[h.node] == h && b == h && u {
-			c.comh = h // record that h is committed
+			c.comh = h         // record that h is committed
+			c.cond.Broadcast() // signal the main thread
 		}
 
 		s += 4 // Two TLCB instances took two time-steps each
 	}
 	c.mut.Unlock()
-	c.wg.Done()
 }
 
 // tlcb implements the TLCB algorithm for full-spread threshold broadcast,
