@@ -37,7 +37,7 @@ func (S Set) best() (*Hist, bool) {
 // A Store's keys are integer TLC time-steps,
 // and its values are Val structures.
 type Store interface {
-	WriteRead(Step, Val) Val // Write if no value yet, then read
+	WriteRead(step Step, value Val, commit bool) (Step, Val)
 }
 
 // Val represents the values that a consensus node's key/value Store maps to.
@@ -57,8 +57,8 @@ type Client struct {
 	mut  sync.Mutex // Mutex protecting the state of this client
 	cond *sync.Cond // Condition variable for cross-thread synchronization
 
-	msg  string // Message we want to commit, "" if none
-	msgh *Hist  // History when message was committed
+	msg  string // message we want to commit, "" if none
+	comh *Hist  // history when message was committed
 
 	kvc  map[Step]map[Node]Val // Cache of key/value store values
 	stop bool                  // Flag: true if the client should stop
@@ -71,6 +71,7 @@ func (c *Client) Start(tr, ts int, kv []Store, rv func() int64) {
 	// Initialize the client's synchronization and key/value cache state.
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Val)
+	c.comh = &Hist{}	// placeholder for last committed history
 
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
@@ -89,7 +90,7 @@ func (c *Client) Commit(msg string) *Hist {
 	for c.msg == msg {
 		c.cond.Wait() // wait until msg has been committed
 	}
-	h := c.msgh // obtain history containing msg
+	h := c.comh // obtain history containing msg
 	c.mut.Unlock()
 	return h
 }
@@ -133,7 +134,7 @@ func (c *Client) thread(node Node) {
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
 		if B2[h.node] == h && b == h && u && h.msg == c.msg {
 			c.msg = ""         // msg has now been committed
-			c.msgh = h         // record history that committed msg
+			c.comh = h         // record history that committed msg
 			c.cond.Broadcast() // signal Commit method
 		}
 
@@ -197,7 +198,7 @@ func (c *Client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
 	}
 
 	// Try to write potential value v, then read that of the client who won
-	v = c.kv[node].WriteRead(s, v)
+	_, v = c.kv[node].WriteRead(s, v, v.H == c.comh)
 	c.kvc[s][node] = v // save value v in our local cache
 
 	// Wait until tr client threads insert values into kvc[s],

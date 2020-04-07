@@ -12,14 +12,14 @@ type testStore struct {
 }
 
 // WriteRead implements the Store interface with a simple intra-process map.
-func (ts *testStore) WriteRead(s Step, v Val) Val {
+func (ts *testStore) WriteRead(s Step, v Val, committed bool) (Step, Val) {
 	ts.mut.Lock()
 	if _, ok := ts.kv[s]; !ok { // no client wrote a value yet for s?
 		ts.kv[s] = v // write-once
 	}
 	v = ts.kv[s] // Read the winning value in any case
 	ts.mut.Unlock()
-	return v
+	return s, v
 }
 
 // Object to record the common total order and verify it for consistency
