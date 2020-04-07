@@ -47,23 +47,21 @@ func (to *testOrder) committed(t *testing.T, h *Hist) {
 func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	kv []Store, to *testOrder, wg *sync.WaitGroup) {
 
-	c := &Client{} // Create a new Client
 	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
-
-	// Start the test Client with appropriate parameters assuming
-	// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
-	c.Start(2*nfail, nfail+1, kv, rv)
 
 	// Commit ncom messages, and consistency-check each commitment.
 	for i := 0; i < ncom; i++ {
-		h := c.Commit(fmt.Sprintf("cli %v commit %v", self, i))
+		c := &Client{} // Create a new Client
+
+		// Start the test Client with appropriate parameters assuming
+		// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
+		msg := fmt.Sprintf("cli %v commit %v", self, i)
+		h := c.Commit(2*nfail, nfail+1, kv, rv, msg)
+
 		to.mut.Lock()
 		to.committed(t, h) // consistency-check history h
 		to.mut.Unlock()
 	}
-
-	// Stop the test Client
-	c.Stop()
 	wg.Done()
 }
 
@@ -94,15 +92,15 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 }
 
 func TestClient(t *testing.T) {
-	testRun(t, 1, 3, 1, 1000, 100) // Standard f=1 case
-	testRun(t, 1, 3, 10, 1000, 100)
-	testRun(t, 1, 3, 20, 1000, 100)
-	testRun(t, 2, 6, 10, 1000, 100)  // Standard f=2 case
-	testRun(t, 3, 9, 10, 1000, 100)  // Standard f=3 case
-	testRun(t, 4, 12, 10, 1000, 100) // Standard f=4 case
-	testRun(t, 5, 15, 10, 1000, 100) // Standard f=10 case
+	testRun(t, 1, 3, 1, 100, 100) // Standard f=1 case
+	testRun(t, 1, 3, 10, 100, 100)
+	testRun(t, 1, 3, 20, 10, 100)
+	testRun(t, 2, 6, 10, 10, 100)  // Standard f=2 case
+	testRun(t, 3, 9, 10, 10, 100)  // Standard f=3 case
+	testRun(t, 4, 12, 10, 10, 100) // Standard f=4 case
+	testRun(t, 5, 15, 10, 10, 100) // Standard f=10 case
 
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
-	testRun(t, 1, 3, 10, 1000, 2) // Extreme low-entropy: rarely commits
-	testRun(t, 1, 3, 10, 1000, 3) // A bit better bit still bad...
+	testRun(t, 1, 3, 10, 10, 2) // Extreme low-entropy: rarely commits
+	testRun(t, 1, 3, 10, 10, 3) // A bit better bit still bad...
 }

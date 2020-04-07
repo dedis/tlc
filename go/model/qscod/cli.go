@@ -57,50 +57,38 @@ type Client struct {
 	mut  sync.Mutex // Mutex protecting the state of this client
 	cond *sync.Cond // Condition variable for cross-thread synchronization
 
-	msg  string // message we want to commit, "" if none
-	comh *Hist  // history when message was committed
+	kvc map[Step]map[Node]Val // Cache of key/value store values
+	comh *Hist  // Last committed history
 
-	kvc  map[Step]map[Node]Val // Cache of key/value store values
-	stop bool                  // Flag: true if the client should stop
+	msg  string // message we want to commit, "" if none
+	msgh *Hist  // history when our msg was committed
 }
 
-// Start starts a Client with given configuration parameters.
-func (c *Client) Start(tr, ts int, kv []Store, rv func() int64) {
-	c.tr, c.ts, c.kv, c.rv = tr, ts, kv, rv
+// Commit starts a Client with given configuration parameters,
+// then requests the client to propose transactions containing
+// application-defined message msg, repeatedly if necessary,
+// until some proposal containing msg successfully commits.
+// Returns the history that successfully committed msg.
+func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64, msg string) *Hist {
+	c.tr, c.ts, c.kv, c.rv, c.msg = tr, ts, kv, rv, msg
 
 	// Initialize the client's synchronization and key/value cache state.
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Val)
-	c.comh = &Hist{}	// placeholder for last committed history
+	c.comh = &Hist{} // placeholder for last committed history
 
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
 		go c.thread(Node(i))
 	}
-}
 
-// Commit requests the client to propose transactions containing
-// application-defined message msg, repeatedly if necessary,
-// until some proposal containing msg successfully commits.
-// Returns the history that successfully committed msg.
-func (c *Client) Commit(msg string) *Hist {
-	c.mut.Lock()       // keep state locked while we're not waiting
-	c.msg = msg        // give the client threads some work to do
-	c.cond.Broadcast() // wake up client threads if necessary
-	for c.msg == msg {
+	c.mut.Lock() // keep state locked while we're not waiting
+	for c.msgh == nil {
 		c.cond.Wait() // wait until msg has been committed
 	}
-	h := c.comh // obtain history containing msg
 	c.mut.Unlock()
-	return h
-}
 
-// Stop shuts down a Client by signaling all its threads to terminate.
-func (c *Client) Stop() {
-	c.mut.Lock()
-	c.stop = true // signal all threads that client is stopping
-	c.cond.Broadcast()
-	c.mut.Unlock()
+	return c.msgh
 }
 
 // thread represents the main loop of a Client's thread
@@ -109,10 +97,9 @@ func (c *Client) thread(node Node) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 	s := Step(0)
 	h := (*Hist)(nil) // First proposal has no predecessor
-	for !c.stop {
-		for c.msg == "" { // If nothing to do, wait for work
-			c.cond.Wait()
-		}
+
+	// Run as long as needed until we can commit our assigned message.
+	for c.msgh == nil {
 
 		// Prepare a proposal containing the message msg
 		// that this Client would like to commit,
@@ -132,10 +119,12 @@ func (c *Client) thread(node Node) {
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u && h.msg == c.msg {
-			c.msg = ""         // msg has now been committed
-			c.comh = h         // record history that committed msg
-			c.cond.Broadcast() // signal Commit method
+		if B2[h.node] == h && b == h && u {
+			c.comh = h         // record that h is committed
+			if h.msg == c.msg {	// committed our message!
+				c.msgh = h
+				c.cond.Broadcast() // signal Commit method
+			}
 		}
 
 		s += 4 // Two TLCB instances took two time-steps each
