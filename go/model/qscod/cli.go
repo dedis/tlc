@@ -54,13 +54,14 @@ type Client struct {
 	kv     []Store      // Node state key/value stores
 	rv     func() int64 // Function to generate random priority values
 
-	mut  sync.Mutex // Mutex protecting the state of this client
-	cond *sync.Cond // Condition variable for cross-thread synchronization
+	mut  sync.Mutex     // Mutex protecting the state of this client
+	cond *sync.Cond     // For threads to await threshold conditions
+	wg   sync.WaitGroup // For synchronizing client thread termination
 
-	kvc map[Step]map[Node]Val // Cache of key/value store values
-	comh *Hist  // Last committed history
-	last Step	// last commit we want to move beyond
-	pref string // preferred value we'd like to commit
+	kvc  map[Step]map[Node]Val // Cache of key/value store values
+	comh *Hist                 // Last committed history
+	last Step                  // last commit we want to move beyond
+	pref string                // preferred value we'd like to commit
 }
 
 // Commit starts a Client with given configuration parameters,
@@ -68,7 +69,7 @@ type Client struct {
 // application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
 func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
-		last Step, pref string) *Hist {
+	last Step, pref string) *Hist {
 	c.tr, c.ts, c.kv, c.rv, c.last, c.pref = tr, ts, kv, rv, last, pref
 
 	// Initialize the client's synchronization and key/value cache state.
@@ -77,14 +78,10 @@ func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
 
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
+		c.wg.Add(1)
 		go c.thread(Node(i))
 	}
-
-	c.mut.Lock() // keep state locked while we're not waiting
-	for c.comh == nil {
-		c.cond.Wait() // wait until msg has been committed
-	}
-	c.mut.Unlock()
+	c.wg.Wait()
 
 	return c.comh
 }
@@ -93,11 +90,12 @@ func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
 // that represents and drives a particular consensus group node.
 func (c *Client) thread(node Node) {
 	c.mut.Lock() // Keep state locked while we're not waiting
-	s := Step(0)
-	h := (*Hist)(nil) // First proposal has no predecessor
 
-	// Run as long as needed until we can commit our assigned message.
-	for c.comh == nil {
+	// Run until we find a commitment at a sufficiently high step number,
+	// and then until we're even with all the other client threads.
+	// Another thread might deadlock waiting for us if we finish too soon.
+	s, h := Step(0), (*Hist)(nil)
+	for c.comh == nil || c.kvc[s] != nil {
 
 		// Prepare a proposal containing the message msg
 		// that this Client would like to commit,
@@ -117,15 +115,14 @@ func (c *Client) thread(node Node) {
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u &&
-				h.step > c.last && c.comh == nil {
-			c.comh = h         // record that h is committed
-			c.cond.Broadcast() // signal Commit method
+		if B2[h.node] == h && b == h && u && h.step > c.last {
+			c.comh = h // record that h is committed
 		}
 
 		s += 4 // Two TLCB instances took two time-steps each
 	}
 	c.mut.Unlock()
+	c.wg.Done()
 }
 
 // tlcb implements the TLCB algorithm for full-spread threshold broadcast,
