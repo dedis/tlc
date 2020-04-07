@@ -28,7 +28,7 @@ type testOrder struct {
 	mut sync.Mutex // mutex protecting this reference order
 }
 
-// When a Client reports a history h has been committed,
+// When a client reports a history h has been committed,
 // record that in the testOrder and check it for global consistency.
 func (to *testOrder) committed(t *testing.T, h *Hist) {
 	if int(h.step/4) >= len(to.hs) { // one new proposal every 4 steps
@@ -43,7 +43,7 @@ func (to *testOrder) committed(t *testing.T, h *Hist) {
 	}
 }
 
-// testCli creates a test Client with particular configuration parameters.
+// testCli creates a test client with particular configuration parameters.
 func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	kv []Store, to *testOrder, wg *sync.WaitGroup) {
 
@@ -52,12 +52,11 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	// Commit ncom messages, and consistency-check each commitment.
 	h := &Hist{} // Placeholder initial history
 	for i := 0; i < ncom; i++ {
-		c := &Client{} // Create a new Client
 
-		// Start the test Client with appropriate parameters assuming
+		// Start the test client with appropriate parameters assuming
 		// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
 		pref := fmt.Sprintf("cli %v commit %v", self, i)
-		h = c.Commit(2*nfail, nfail+1, kv, rv, pref, h)
+		h = Commit(2*nfail, nfail+1, kv, rv, pref, h)
 		//println("thread", self, "got commit", h.step, h.msg)
 
 		to.mut.Lock()
@@ -83,7 +82,7 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 		to := &testOrder{}
 
 		// Simulate the appropriate number of concurrent clients
-		cli := make([]Client, ncli)
+		cli := make([]client, ncli)
 		wg := &sync.WaitGroup{}
 		for i := range cli {
 			wg.Add(1)
@@ -97,6 +96,9 @@ func TestClient(t *testing.T) {
 	testRun(t, 1, 3, 1, 1000, 100) // Standard f=1 case
 	testRun(t, 1, 3, 10, 1000, 100)
 	testRun(t, 1, 3, 20, 1000, 100)
+	testRun(t, 1, 3, 50, 1000, 100)
+	testRun(t, 1, 3, 100, 1000, 100)
+
 	testRun(t, 2, 6, 10, 1000, 100)  // Standard f=2 case
 	testRun(t, 3, 9, 10, 1000, 100)  // Standard f=3 case
 	testRun(t, 4, 12, 10, 1000, 100) // Standard f=4 case

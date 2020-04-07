@@ -46,10 +46,10 @@ type Val struct {
 	R, B  Set
 }
 
-// Client represents one logical client issuing transactions
+// client represents one logical client issuing transactions
 // to the consensus group and driving the QSC/TLC state machine forward
 // asynchronously across the n key/value stores.
-type Client struct {
+type client struct {
 	tr, ts int                   // TLCB thresholds
 	kv     []Store               // Node state key/value stores
 	rv     func() int64          // Function to generate random priorities
@@ -59,15 +59,15 @@ type Client struct {
 	comh   *Hist                 // Last committed history
 }
 
-// Commit starts a Client with given configuration parameters,
+// Commit starts a client with given configuration parameters,
 // then requests the client to propose transactions containing
 // application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
-func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
+func Commit(tr, ts int, kv []Store, rv func() int64,
 	pref string, preh *Hist) *Hist {
-	c.tr, c.ts, c.kv, c.rv = tr, ts, kv, rv
 
 	// Initialize the client's synchronization and key/value cache state.
+	c := &client{tr: tr, ts: ts, kv: kv, rv: rv}
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Val)
 
@@ -86,9 +86,9 @@ func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
 	return c.comh // Return next committed history we learned
 }
 
-// thread represents the main loop of a Client's thread
+// thread represents the main loop of a client's thread
 // that represents and drives a particular consensus group node.
-func (c *Client) thread(node Node, pref string, s Step, h *Hist) {
+func (c *client) thread(node Node, pref string, s Step, h *Hist) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 
 	// Run until we find a commitment at a sufficiently high step number,
@@ -97,7 +97,7 @@ func (c *Client) thread(node Node, pref string, s Step, h *Hist) {
 	for c.comh == nil || c.kvc[s] != nil {
 
 		// Prepare a proposal containing the message msg
-		// that this Client would like to commit,
+		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
 		v0 := Val{H: h, Hp: &Hist{node, s, h, pref, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
@@ -138,7 +138,7 @@ func (c *Client) thread(node Node, pref string, s Step, h *Hist) {
 // These locally-computed sets cannot be relied on to be definite for this node
 // until the values computed from them are committed via Store.WriteRead.
 //
-func (c *Client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
+func (c *client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 
 	// First invoke TLCR to (try to) record the desired next-state value,
 	// and record the definite winning value and a tentative receive-set.
@@ -171,7 +171,7 @@ func (c *Client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 // tlcr implements the TLCR algorithm for receive-threshold broadcast,
 // each requiring a single TLC time-step.
 //
-func (c *Client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
+func (c *client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
 
 	// Create our key/value cache map for step s if not already created
 	if _, ok := c.kvc[s]; !ok {
