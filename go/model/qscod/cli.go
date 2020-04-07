@@ -59,23 +59,21 @@ type Client struct {
 
 	kvc map[Step]map[Node]Val // Cache of key/value store values
 	comh *Hist  // Last committed history
-
-	msg  string // message we want to commit, "" if none
-	msgh *Hist  // history when our msg was committed
+	last Step	// last commit we want to move beyond
+	pref string // preferred value we'd like to commit
 }
 
 // Commit starts a Client with given configuration parameters,
 // then requests the client to propose transactions containing
-// application-defined message msg, repeatedly if necessary,
-// until some proposal containing msg successfully commits.
+// application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
-func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64, msg string) *Hist {
-	c.tr, c.ts, c.kv, c.rv, c.msg = tr, ts, kv, rv, msg
+func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
+		last Step, pref string) *Hist {
+	c.tr, c.ts, c.kv, c.rv, c.last, c.pref = tr, ts, kv, rv, last, pref
 
 	// Initialize the client's synchronization and key/value cache state.
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Val)
-	c.comh = &Hist{} // placeholder for last committed history
 
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
@@ -83,12 +81,12 @@ func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64, msg string) *Hi
 	}
 
 	c.mut.Lock() // keep state locked while we're not waiting
-	for c.msgh == nil {
+	for c.comh == nil {
 		c.cond.Wait() // wait until msg has been committed
 	}
 	c.mut.Unlock()
 
-	return c.msgh
+	return c.comh
 }
 
 // thread represents the main loop of a Client's thread
@@ -99,12 +97,12 @@ func (c *Client) thread(node Node) {
 	h := (*Hist)(nil) // First proposal has no predecessor
 
 	// Run as long as needed until we can commit our assigned message.
-	for c.msgh == nil {
+	for c.comh == nil {
 
 		// Prepare a proposal containing the message msg
 		// that this Client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Val{H: h, Hp: &Hist{node, s, h, c.msg, c.rv()}}
+		v0 := Val{H: h, Hp: &Hist{node, s, h, c.pref, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 		h = v0.H // correct our state from v0 read
 
@@ -119,12 +117,10 @@ func (c *Client) thread(node Node) {
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u {
+		if B2[h.node] == h && b == h && u &&
+				h.step > c.last && c.comh == nil {
 			c.comh = h         // record that h is committed
-			if h.msg == c.msg {	// committed our message!
-				c.msgh = h
-				c.cond.Broadcast() // signal Commit method
-			}
+			c.cond.Broadcast() // signal Commit method
 		}
 
 		s += 4 // Two TLCB instances took two time-steps each
