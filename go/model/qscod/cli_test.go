@@ -50,16 +50,15 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
 
 	// Commit ncom messages, and consistency-check each commitment.
-	var last Step
+	h := &Hist{} // Placeholder initial history
 	for i := 0; i < ncom; i++ {
 		c := &Client{} // Create a new Client
 
 		// Start the test Client with appropriate parameters assuming
 		// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
 		pref := fmt.Sprintf("cli %v commit %v", self, i)
-		h := c.Commit(2*nfail, nfail+1, kv, rv, last, pref)
+		h = c.Commit(2*nfail, nfail+1, kv, rv, pref, h)
 		//println("thread", self, "got commit", h.step, h.msg)
-		last = h.step
 
 		to.mut.Lock()
 		to.committed(t, h) // consistency-check history h
@@ -95,15 +94,15 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 }
 
 func TestClient(t *testing.T) {
-	testRun(t, 1, 3, 1, 100, 100) // Standard f=1 case
-	testRun(t, 1, 3, 10, 100, 100)
-	testRun(t, 1, 3, 20, 100, 100)
-	testRun(t, 2, 6, 10, 100, 100)  // Standard f=2 case
-	testRun(t, 3, 9, 10, 100, 100)  // Standard f=3 case
-	testRun(t, 4, 12, 10, 100, 100) // Standard f=4 case
-	testRun(t, 5, 15, 10, 100, 100) // Standard f=10 case
+	testRun(t, 1, 3, 1, 1000, 100) // Standard f=1 case
+	testRun(t, 1, 3, 10, 1000, 100)
+	testRun(t, 1, 3, 20, 1000, 100)
+	testRun(t, 2, 6, 10, 1000, 100)  // Standard f=2 case
+	testRun(t, 3, 9, 10, 1000, 100)  // Standard f=3 case
+	testRun(t, 4, 12, 10, 1000, 100) // Standard f=4 case
+	testRun(t, 5, 15, 10, 1000, 100) // Standard f=10 case
 
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
-	testRun(t, 1, 3, 10, 100, 2) // Extreme low-entropy: rarely commits
-	testRun(t, 1, 3, 10, 100, 3) // A bit better bit still bad...
+	testRun(t, 1, 3, 10, 1000, 2) // Extreme low-entropy: rarely commits
+	testRun(t, 1, 3, 10, 1000, 3) // A bit better bit still bad...
 }

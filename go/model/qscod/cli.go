@@ -59,9 +59,9 @@ type Client struct {
 	wg   sync.WaitGroup // For synchronizing client thread termination
 
 	kvc  map[Step]map[Node]Val // Cache of key/value store values
-	comh *Hist                 // Last committed history
-	last Step                  // last commit we want to move beyond
 	pref string                // preferred value we'd like to commit
+	preh *Hist                 // Previous history we want to build on
+	comh *Hist                 // Last committed history
 }
 
 // Commit starts a Client with given configuration parameters,
@@ -69,8 +69,8 @@ type Client struct {
 // application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
 func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
-	last Step, pref string) *Hist {
-	c.tr, c.ts, c.kv, c.rv, c.last, c.pref = tr, ts, kv, rv, last, pref
+	pref string, preh *Hist) *Hist {
+	c.tr, c.ts, c.kv, c.rv, c.pref, c.preh = tr, ts, kv, rv, pref, preh
 
 	// Initialize the client's synchronization and key/value cache state.
 	c.cond = sync.NewCond(&c.mut)
@@ -79,22 +79,21 @@ func (c *Client) Commit(tr, ts int, kv []Store, rv func() int64,
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
 		c.wg.Add(1)
-		go c.thread(Node(i))
+		go c.thread(Node(i), preh.step+4, preh)
 	}
 	c.wg.Wait()
 
-	return c.comh
+	return c.comh // Return next committed history we learned
 }
 
 // thread represents the main loop of a Client's thread
 // that represents and drives a particular consensus group node.
-func (c *Client) thread(node Node) {
+func (c *Client) thread(node Node, s Step, h *Hist) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 
 	// Run until we find a commitment at a sufficiently high step number,
 	// and then until we're even with all the other client threads.
 	// Another thread might deadlock waiting for us if we finish too soon.
-	s, h := Step(0), (*Hist)(nil)
 	for c.comh == nil || c.kvc[s] != nil {
 
 		// Prepare a proposal containing the message msg
@@ -108,14 +107,14 @@ func (c *Client) thread(node Node) {
 		// we see emerging from the first TLCB instance,
 		// in attempt to reconfirm (double-confirm) that proposal
 		// so that all nodes will *know* that it's been confirmed.
-		v2 := Val{R: R0, B: B0}
+		v2 := Val{H: h, R: R0, B: B0}
 		v2.Hp, _ = B0.best() // some best confirmed proposal from B0
 		v2, R2, B2 := c.tlcb(node, s+2, v2)
 		R0, B0 = v2.R, v2.B // correct our state from v2 read
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u && h.step > c.last {
+		if B2[h.node] == h && b == h && u {
 			c.comh = h // record that h is committed
 		}
 
@@ -147,7 +146,7 @@ func (c *Client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 
 	// Prepare a value to broadcast in the second TLCR invocation,
 	// indicating which proposals we received from the first.
-	v1 := Val{R: make(Set)}
+	v1 := Val{H: v0.H, R: make(Set)}
 	for i, v := range v0r {
 		v1.R[i] = v.Hp
 	}
@@ -180,7 +179,14 @@ func (c *Client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
 	}
 
 	// Try to write potential value v, then read that of the client who won
-	_, v = c.kv[node].WriteRead(s, v, v.H == c.comh)
+	sv, v := c.kv[node].WriteRead(s, v, v.H == c.comh)
+	if sv > s { // Need to catch up to someone else who's ahead
+		println("node", node, "catching up from", s, "to", sv)
+		if c.comh == nil || c.comh.step < sv {
+			c.comh = v.H // committed history to skip forward to
+		}
+		v = Val{} // finish this step with an empty value
+	}
 	c.kvc[s][node] = v // save value v in our local cache
 
 	// Wait until tr client threads insert values into kvc[s],
