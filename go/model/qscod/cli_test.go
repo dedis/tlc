@@ -9,52 +9,53 @@ import "testing"
 type testStore struct {
 	mut  sync.Mutex   // synchronization for testStore state
 	kv   map[Step]Val // the key/value map
-	comh *Hist        // latest history known to be committed
+	comh Hist         // latest history known to be committed
 }
 
 // WriteRead implements the Store interface with a simple intra-process map.
-func (ts *testStore) WriteRead(s Step, v Val) (Val, *Hist) {
+func (ts *testStore) WriteRead(s Step, v Val) (Val, Hist) {
 	ts.mut.Lock()
 	defer ts.mut.Unlock()
-	if ts.comh != nil && s < ts.comh.step { // step s is too old?
+	if s < ts.comh.step { // step s is too old?
 		return v, ts.comh
 	}
 	if _, ok := ts.kv[s]; !ok { // no client wrote a value yet for s?
 		ts.kv[s] = v // write-once
 	}
-	v = ts.kv[s] // Read the winning value in any case
-	return v, nil
+	return ts.kv[s], Hist{} // Return the winning value in any case
 }
 
-func (ts *testStore) Committed(comh *Hist) {
-	if ts.comh == nil || ts.comh.step < comh.step {
+func (ts *testStore) Committed(comh Hist) {
+	ts.mut.Lock()
+	if ts.comh.step < comh.step {
 		ts.comh = comh
 	}
+	ts.mut.Unlock()
 }
 
 // Object to record the common total order and verify it for consistency
 type testOrder struct {
-	hs  []*Hist    // all history known to be committed so far
+	hs  []Hist     // all history known to be committed so far
 	mut sync.Mutex // mutex protecting this reference order
 }
 
 // When a client reports a history h has been committed,
 // record that in the testOrder and check it for global consistency.
-func (to *testOrder) committed(t *testing.T, h *Hist) {
+func (to *testOrder) committed(t *testing.T, h Hist) {
 	to.mut.Lock()
 	defer to.mut.Unlock()
 
 	// Ensure history slice is long enough
 	for h.step >= Step(len(to.hs)) {
-		to.hs = append(to.hs, nil)
+		to.hs = append(to.hs, Hist{})
 	}
 
 	// Check commit consistency across all concurrent clients
 	switch {
-	case to.hs[h.step] == nil:
+	case to.hs[h.step] == Hist{}:
 		to.hs[h.step] = h
 	case to.hs[h.step] != h:
-		t.Errorf("%v UNSAFE %v != %v", h.step, h.app, to.hs[h.step].app)
+		t.Errorf("UNSAFE at %v:\n%+v\n%+v", h.step, h, to.hs[h.step])
 	}
 }
 
@@ -65,7 +66,7 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
 
 	// Commit ncom messages, and consistency-check each commitment.
-	h := &Hist{} // Placeholder initial history
+	h := Hist{}
 	for i := 0; i < ncom; i++ {
 
 		// Start the test client with appropriate parameters assuming

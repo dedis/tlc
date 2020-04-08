@@ -7,7 +7,7 @@ import "sync"
 type Node int   // Node represents a node number from 0 through n-1
 type Step int64 // Step represents a TLC time-step counting from 0
 
-// Hist represents the head of a node's history, either tentative or finalized.
+// Hist represents a view of history proposed by some node in a QSC round.
 type Hist struct {
 	node Node   // Node that proposed this history
 	step Step   // TLC time-step number this history is for
@@ -16,16 +16,15 @@ type Hist struct {
 }
 
 // Set represents a set of proposed histories from the same time-step.
-type Set map[Node]*Hist
+type Set map[Node]Hist
 
 // best returns some maximum-priority history in a Set,
 // together with a flag indicating whether the returned history
 // is uniquely the best, i.e., the set contains no history tied for best.
-func (S Set) best() (*Hist, bool) {
-	b, u := &Hist{pri: -1}, false
+func (S Set) best() (b Hist, u bool) {
 	for _, h := range S {
 		if h.pri >= b.pri {
-			b, u = h, !(h.pri == b.pri)
+			b, u = h, h.pri > b.pri
 		}
 	}
 	return b, u
@@ -37,21 +36,21 @@ func (S Set) best() (*Hist, bool) {
 // and its values are Val structures.
 //
 // WriteRead(step, value) attempts to write value to the store at step,
-// returning the first value written by any client and nil for comh.
+// returning the first value written by any client and Hist{} for comh.
 // If the requested step has been aged out of the store,
 // returns the input value unmodified and the last committed history.
 //
 // Committed(comh) informs the Store that history comh has been committed,
-// and all key/value pairs before comh.step may be aged out of the store.
+// and that all key/value pairs before comh.step may be aged out of the store.
 //
 type Store interface {
-	WriteRead(step Step, value Val) (actual Val, comh *Hist)
-	Committed(comh *Hist)
+	WriteRead(step Step, value Val) (actual Val, comh Hist)
+	Committed(comh Hist)
 }
 
 // Val represents the values that a consensus node's key/value Store maps to.
 type Val struct {
-	H, Hp *Hist
+	H, Hp Hist
 	R, B  Set
 }
 
@@ -65,7 +64,7 @@ type client struct {
 	mut    sync.Mutex            // Mutex protecting this client's state
 	cond   *sync.Cond            // For awaiting threshold conditions
 	kvc    map[Step]map[Node]Val // Cache of key/value store values
-	comh   *Hist                 // Last committed history
+	comh   Hist                  // Last committed history
 }
 
 // Commit starts a client with given configuration parameters,
@@ -73,7 +72,7 @@ type client struct {
 // application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
 func Commit(tr, ts int, kv []Store, rv func() int64,
-	pref string, preh *Hist) *Hist {
+	pref string, preh Hist) Hist {
 
 	// Initialize the client's synchronization and key/value cache state.
 	c := &client{tr: tr, ts: ts, kv: kv, rv: rv}
@@ -87,45 +86,48 @@ func Commit(tr, ts int, kv []Store, rv func() int64,
 
 	// Wait for some thread to discover the next committed history
 	c.mut.Lock()
-	for c.comh == nil {
+	for c.comh.step == 0 {
 		c.cond.Wait()
 	}
 	c.mut.Unlock()
 
-	// Return the next committed history we learned
+	// Any slow client threads will continue in the background
+	// until they catch up with the others and terminate.
+
+	// Return the next committed history we learned.
 	return c.comh
 }
 
 // thread represents the main loop of a client's thread
 // that represents and drives a particular consensus group node.
-func (c *client) thread(node Node, pref string, s Step, h *Hist) {
+func (c *client) thread(node Node, pref string, s Step, h Hist) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 	defer c.mut.Unlock()
 
 	// Run until we find a commitment at a sufficiently high step number,
 	// and then until we're even with all the other client threads.
 	// Another thread might deadlock waiting for us if we finish too soon.
-	for c.comh == nil || c.kvc[s] != nil {
+	for c.comh.step == 0 || c.kvc[s] != nil {
 
 		// Prepare a proposal containing the message msg
 		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Val{H: h, Hp: &Hist{node, s, c.rv(), pref}}
+		v0 := Val{H: h, Hp: Hist{node, s, c.rv(), pref}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
-		h = v0.H // correct our state from v0 read
+		h = v0.H // correct our initial history state from v0 read
 
 		// Invoke TLCB again to re-broadcast the best eligible proposal
-		// we see emerging from the first TLCB instance,
+		// we see in the B0 returned from the first TLCB instance,
 		// in attempt to reconfirm (double-confirm) that proposal
 		// so that all nodes will *know* that it's been confirmed.
-		v2 := Val{H: h, R: R0, B: B0}
+		v2 := Val{R: R0, B: B0}
 		v2.Hp, _ = B0.best() // some best confirmed proposal from B0
 		v2, R2, B2 := c.tlcb(node, s+2, v2)
 		R0, B0 = v2.R, v2.B // correct our state from v2 read
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u && c.comh == nil {
+		if B2[h.node] == h && b == h && u && c.comh.step == 0 {
 			c.comh = h              // record that h is committed
 			c.cond.Broadcast()      // signal the main thread
 			c.kv[node].Committed(h) // garbage-collect older steps
@@ -157,7 +159,7 @@ func (c *client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 
 	// Prepare a value to broadcast in the second TLCR invocation,
 	// indicating which proposals we received from the first.
-	v1 := Val{H: v0.H, R: make(Set)}
+	v1 := Val{R: make(Set)}
 	for i, v := range v0r {
 		v1.R[i] = v.Hp
 	}
@@ -167,6 +169,7 @@ func (c *client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 	// compute potential receive-set (R) and broadcast-set (B) sets
 	// to return from TLCB.
 	R, B, Bc := make(Set), make(Set), make([]int, len(c.kv))
+	//fmt.Printf("v1r %+v\n", v1r)
 	for _, v := range v1r {
 		for j, h := range v.R {
 			R[j] = h           // R has all histories we've seen
@@ -192,7 +195,7 @@ func (c *client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
 	// Try to write potential value v, then read that of the client who won.
 	// If we already found a committed history, ourselves or virally,
 	// then just pretend to do writes until we can synchronize and finish.
-	if c.comh == nil {
+	if c.comh.step == 0 {
 		v, c.comh = c.kv[node].WriteRead(s, v)
 	}
 	c.kvc[s][node] = v // save value v in our local cache
