@@ -54,7 +54,7 @@ func (to *testOrder) committed(t *testing.T, h *Hist) {
 	case to.hs[h.step] == nil:
 		to.hs[h.step] = h
 	case to.hs[h.step] != h:
-		t.Errorf("%v UNSAFE %v != %v", h.step, h.msg, to.hs[h.step].msg)
+		t.Errorf("%v UNSAFE %v != %v", h.step, h.app, to.hs[h.step].app)
 	}
 }
 
@@ -72,7 +72,7 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 		// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
 		pref := fmt.Sprintf("cli %v commit %v", self, i)
 		h = Commit(2*nfail, nfail+1, kv, rv, pref, h)
-		//println("thread", self, "got commit", h.step, h.msg)
+		//println("thread", self, "got commit", h.step, h.app)
 
 		to.committed(t, h) // consistency-check history h
 	}

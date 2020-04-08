@@ -11,8 +11,8 @@ type Step int64 // Step represents a TLC time-step counting from 0
 type Hist struct {
 	node Node   // Node that proposed this history
 	step Step   // TLC time-step number this history is for
-	msg  string // Application message in this proposal
 	pri  int64  // Random priority value
+	app  string // Application data string for this proposal
 }
 
 // Set represents a set of proposed histories from the same time-step.
@@ -110,7 +110,7 @@ func (c *client) thread(node Node, pref string, s Step, h *Hist) {
 		// Prepare a proposal containing the message msg
 		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Val{H: h, Hp: &Hist{node, s, pref, c.rv()}}
+		v0 := Val{H: h, Hp: &Hist{node, s, c.rv(), pref}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 		h = v0.H // correct our state from v0 read
 
