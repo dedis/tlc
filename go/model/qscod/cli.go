@@ -9,10 +9,10 @@ type Step int64 // Step represents a TLC time-step counting from 0
 
 // Hist represents a view of history proposed by some node in a QSC round.
 type Hist struct {
-	node Node   // Node that proposed this history
-	step Step   // TLC time-step number this history is for
-	pri  int64  // Random priority value
-	app  string // Application data string for this proposal
+	Node Node   // Node that proposed this history
+	Step Step   // TLC time-step number this history is for
+	Pri  int64  // Random priority value
+	Data string // Application data string for this proposal
 }
 
 // Set represents a set of proposed histories from the same time-step.
@@ -23,8 +23,8 @@ type Set map[Node]Hist
 // is uniquely the best, i.e., the set contains no history tied for best.
 func (S Set) best() (b Hist, u bool) {
 	for _, h := range S {
-		if h.pri >= b.pri {
-			b, u = h, h.pri > b.pri
+		if h.Pri >= b.Pri {
+			b, u = h, h.Pri > b.Pri
 		}
 	}
 	return b, u
@@ -41,7 +41,7 @@ func (S Set) best() (b Hist, u bool) {
 // returns the input value unmodified and the last committed history.
 //
 // Committed(comh) informs the Store that history comh has been committed,
-// and that all key/value pairs before comh.step may be aged out of the store.
+// and that all key/value pairs before comh.Step may be aged out of the store.
 //
 type Store interface {
 	WriteRead(step Step, value Value) (actual Value, comh Hist)
@@ -71,22 +71,22 @@ type client struct {
 // then requests the client to propose transactions containing
 // application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
-func Commit(tr, ts int, kv []Store, rv func() int64,
-	pref string, preh Hist) Hist {
+func Commit(tr, ts int, kvStores []Store, randomPri func() int64,
+	proposedData string, preHist Hist) Hist {
 
 	// Initialize the client's synchronization and key/value cache state.
-	c := &client{tr: tr, ts: ts, kv: kv, rv: rv}
+	c := &client{tr: tr, ts: ts, kv: kvStores, rv: randomPri}
 	c.cond = sync.NewCond(&c.mut)
 	c.kvc = make(map[Step]map[Node]Value)
 
 	// Launch one client thread to drive each of the n consensus nodes.
-	for i := range kv {
-		go c.thread(Node(i), pref, preh.step+4, preh)
+	for i := range kvStores {
+		go c.thread(Node(i), proposedData, preHist.Step+4, preHist)
 	}
 
 	// Wait for some thread to discover the next committed history
 	c.mut.Lock()
-	for c.comh.step == 0 {
+	for c.comh.Step == 0 {
 		c.cond.Wait()
 	}
 	c.mut.Unlock()
@@ -100,20 +100,20 @@ func Commit(tr, ts int, kv []Store, rv func() int64,
 
 // thread represents the main loop of a client's thread
 // that represents and drives a particular consensus group node.
-func (c *client) thread(node Node, pref string, s Step, h Hist) {
+func (c *client) thread(node Node, pref string, step Step, h Hist) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 	defer c.mut.Unlock()
 
 	// Run until we find a commitment at a sufficiently high step number,
 	// and then until we're even with all the other client threads.
 	// Another thread might deadlock waiting for us if we finish too soon.
-	for c.comh.step == 0 || c.kvc[s] != nil {
+	for c.comh.Step == 0 || c.kvc[step] != nil {
 
 		// Prepare a proposal containing the message msg
 		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Value{H: h, Hp: Hist{node, s, c.rv(), pref}}
-		v0, R0, B0 := c.tlcb(node, s+0, v0)
+		v0 := Value{H: h, Hp: Hist{node, step, c.rv(), pref}}
+		v0, R0, B0 := c.tlcb(node, step+0, v0)
 		h = v0.H // correct our initial history state from v0 read
 
 		// Invoke TLCB again to re-broadcast the best eligible proposal
@@ -122,18 +122,18 @@ func (c *client) thread(node Node, pref string, s Step, h Hist) {
 		// so that all nodes will *know* that it's been confirmed.
 		v2 := Value{R: R0, B: B0}
 		v2.Hp, _ = B0.best() // some best confirmed proposal from B0
-		v2, R2, B2 := c.tlcb(node, s+2, v2)
+		v2, R2, B2 := c.tlcb(node, step+2, v2)
 		R0, B0 = v2.R, v2.B // correct our state from v2 read
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u && c.comh.step == 0 {
+		if B2[h.Node] == h && b == h && u && c.comh.Step == 0 {
 			c.comh = h              // record that h is committed
 			c.cond.Broadcast()      // signal the main thread
 			c.kv[node].Committed(h) // garbage-collect older steps
 		}
 
-		s += 4 // Two TLCB instances took two time-steps each
+		step += 4 // Two TLCB instances took two time-steps each
 	}
 }
 
@@ -151,11 +151,11 @@ func (c *client) thread(node Node, pref string, s Step, h Hist) {
 // These locally-computed sets cannot be relied on to be definite for this node
 // until the values computed from them are committed via Store.WriteRead.
 //
-func (c *client) tlcb(node Node, s Step, v0 Value) (Value, Set, Set) {
+func (c *client) tlcb(node Node, step Step, v0 Value) (Value, Set, Set) {
 
 	// First invoke TLCR to (try to) record the desired next-state value,
 	// and record the definite winning value and a tentative receive-set.
-	v0, v0r := c.tlcr(node, s+0, v0)
+	v0, v0r := c.tlcr(node, step+0, v0)
 
 	// Prepare a value to broadcast in the second TLCR invocation,
 	// indicating which proposals we received from the first.
@@ -163,13 +163,12 @@ func (c *client) tlcb(node Node, s Step, v0 Value) (Value, Set, Set) {
 	for i, v := range v0r {
 		v1.R[i] = v.Hp
 	}
-	v1, v1r := c.tlcr(node, s+1, v1)
+	v1, v1r := c.tlcr(node, step+1, v1)
 
 	// Using the tentative client-side receive-set from the second TLCR,
 	// compute potential receive-set (R) and broadcast-set (B) sets
 	// to return from TLCB.
 	R, B, Bc := make(Set), make(Set), make([]int, len(c.kv))
-	//fmt.Printf("v1r %+v\n", v1r)
 	for _, v := range v1r {
 		for j, h := range v.R {
 			R[j] = h           // R has all histories we've seen
@@ -185,28 +184,28 @@ func (c *client) tlcb(node Node, s Step, v0 Value) (Value, Set, Set) {
 // tlcr implements the TLCR algorithm for receive-threshold broadcast,
 // each requiring a single TLC time-step.
 //
-func (c *client) tlcr(node Node, s Step, v Value) (Value, map[Node]Value) {
+func (c *client) tlcr(node Node, step Step, v Value) (Value, map[Node]Value) {
 
 	// Create our key/value cache map for step s if not already created
-	if _, ok := c.kvc[s]; !ok {
-		c.kvc[s] = make(map[Node]Value)
+	if _, ok := c.kvc[step]; !ok {
+		c.kvc[step] = make(map[Node]Value)
 	}
 
 	// Try to write potential value v, then read that of the client who won.
 	// If we found a committed history, either ourselves or virally,
 	// then just pretend to do writes until we can synchronize and finish.
-	if c.comh.step == 0 {
-		v, c.comh = c.kv[node].WriteRead(s, v)
+	if c.comh.Step == 0 {
+		v, c.comh = c.kv[node].WriteRead(step, v)
 	}
-	c.kvc[s][node] = v // save value v in our local cache
+	c.kvc[step][node] = v // save value v in our local cache
 
 	// Wait until tr client threads insert values into kvc[s],
 	// waking up all waiting threads once this condition is satisfied.
-	if len(c.kvc[s]) == c.tr {
+	if len(c.kvc[step]) == c.tr {
 		c.cond.Broadcast() // wake up waiting threads
 	}
-	for len(c.kvc[s]) < c.tr {
+	for len(c.kvc[step]) < c.tr {
 		c.cond.Wait() // wait to reach receive threshold
 	}
-	return v, c.kvc[s] // return some satisfying value set
+	return v, c.kvc[step] // return some satisfying value set
 }

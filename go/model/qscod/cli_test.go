@@ -18,7 +18,7 @@ func (ts *testStore) WriteRead(s Step, v Value) (Value, Hist) {
 	defer ts.mut.Unlock()
 
 	// If the requested step s is too old, return last committed history
-	if s < ts.comh.step {
+	if s < ts.comh.Step {
 		return v, ts.comh
 	}
 
@@ -33,7 +33,7 @@ func (ts *testStore) WriteRead(s Step, v Value) (Value, Hist) {
 // For testing we don't actually garbage-collect but just mark them off-limits.
 func (ts *testStore) Committed(comh Hist) {
 	ts.mut.Lock()
-	if ts.comh.step < comh.step {
+	if ts.comh.Step < comh.Step {
 		ts.comh = comh
 	}
 	ts.mut.Unlock()
@@ -52,16 +52,16 @@ func (to *testOrder) committed(t *testing.T, h Hist) {
 	defer to.mut.Unlock()
 
 	// Ensure history slice is long enough
-	for h.step >= Step(len(to.hs)) {
+	for h.Step >= Step(len(to.hs)) {
 		to.hs = append(to.hs, Hist{})
 	}
 
 	// Check commit consistency across all concurrent clients
 	switch {
-	case to.hs[h.step] == Hist{}:
-		to.hs[h.step] = h
-	case to.hs[h.step] != h:
-		t.Errorf("UNSAFE at %v:\n%+v\n%+v", h.step, h, to.hs[h.step])
+	case to.hs[h.Step] == Hist{}:
+		to.hs[h.Step] = h
+	case to.hs[h.Step] != h:
+		t.Errorf("UNSAFE at %v:\n%+v\n%+v", h.Step, h, to.hs[h.Step])
 	}
 }
 
@@ -79,7 +79,7 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 		// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
 		pref := fmt.Sprintf("cli %v commit %v", self, i)
 		h = Commit(2*nfail, nfail+1, kv, rv, pref, h)
-		//println("thread", self, "got commit", h.step, h.app)
+		//println("thread", self, "got commit", h.Step, h.Data)
 
 		to.committed(t, h) // consistency-check history h
 	}
