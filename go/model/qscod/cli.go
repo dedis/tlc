@@ -33,7 +33,7 @@ func (S Set) best() (b Hist, u bool) {
 // Store represents an interface to one of the n key/value stores
 // representing the persistent state of each of the n consensus group members.
 // A Store's keys are integer TLC time-steps,
-// and its values are Val structures.
+// and its values are Value structures.
 //
 // WriteRead(step, value) attempts to write value to the store at step,
 // returning the first value written by any client and Hist{} for comh.
@@ -44,12 +44,12 @@ func (S Set) best() (b Hist, u bool) {
 // and that all key/value pairs before comh.step may be aged out of the store.
 //
 type Store interface {
-	WriteRead(step Step, value Val) (actual Val, comh Hist)
+	WriteRead(step Step, value Value) (actual Value, comh Hist)
 	Committed(comh Hist)
 }
 
-// Val represents the values that a consensus node's key/value Store maps to.
-type Val struct {
+// Value represents the values that a consensus node's key/value Store maps to.
+type Value struct {
 	H, Hp Hist
 	R, B  Set
 }
@@ -58,13 +58,13 @@ type Val struct {
 // to the consensus group and driving the QSC/TLC state machine forward
 // asynchronously across the n key/value stores.
 type client struct {
-	tr, ts int                   // TLCB thresholds
-	kv     []Store               // Node state key/value stores
-	rv     func() int64          // Function to generate random priorities
-	mut    sync.Mutex            // Mutex protecting this client's state
-	cond   *sync.Cond            // For awaiting threshold conditions
-	kvc    map[Step]map[Node]Val // Cache of key/value store values
-	comh   Hist                  // Last committed history
+	tr, ts int                     // TLCB thresholds
+	kv     []Store                 // Node state key/value stores
+	rv     func() int64            // Random priority generator
+	mut    sync.Mutex              // Mutex protecting this client's state
+	cond   *sync.Cond              // For awaiting threshold conditions
+	kvc    map[Step]map[Node]Value // Cache of key/value store values
+	comh   Hist                    // Last committed history
 }
 
 // Commit starts a client with given configuration parameters,
@@ -77,7 +77,7 @@ func Commit(tr, ts int, kv []Store, rv func() int64,
 	// Initialize the client's synchronization and key/value cache state.
 	c := &client{tr: tr, ts: ts, kv: kv, rv: rv}
 	c.cond = sync.NewCond(&c.mut)
-	c.kvc = make(map[Step]map[Node]Val)
+	c.kvc = make(map[Step]map[Node]Value)
 
 	// Launch one client thread to drive each of the n consensus nodes.
 	for i := range kv {
@@ -112,7 +112,7 @@ func (c *client) thread(node Node, pref string, s Step, h Hist) {
 		// Prepare a proposal containing the message msg
 		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Val{H: h, Hp: Hist{node, s, c.rv(), pref}}
+		v0 := Value{H: h, Hp: Hist{node, s, c.rv(), pref}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 		h = v0.H // correct our initial history state from v0 read
 
@@ -120,7 +120,7 @@ func (c *client) thread(node Node, pref string, s Step, h Hist) {
 		// we see in the B0 returned from the first TLCB instance,
 		// in attempt to reconfirm (double-confirm) that proposal
 		// so that all nodes will *know* that it's been confirmed.
-		v2 := Val{R: R0, B: B0}
+		v2 := Value{R: R0, B: B0}
 		v2.Hp, _ = B0.best() // some best confirmed proposal from B0
 		v2, R2, B2 := c.tlcb(node, s+2, v2)
 		R0, B0 = v2.R, v2.B // correct our state from v2 read
@@ -142,7 +142,7 @@ func (c *client) thread(node Node, pref string, s Step, h Hist) {
 //
 // The provided v0 represents a potential next state for this node,
 // but other clients may of course race with this one to set the next state.
-// The returned Val represents the next-state value successfully registered
+// The returned Value represents the next-state value successfully registered
 // by whatever client won this race to initiate TLCB at step s.
 //
 // The returned R and B sets, in contrast, are tentative,
@@ -151,7 +151,7 @@ func (c *client) thread(node Node, pref string, s Step, h Hist) {
 // These locally-computed sets cannot be relied on to be definite for this node
 // until the values computed from them are committed via Store.WriteRead.
 //
-func (c *client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
+func (c *client) tlcb(node Node, s Step, v0 Value) (Value, Set, Set) {
 
 	// First invoke TLCR to (try to) record the desired next-state value,
 	// and record the definite winning value and a tentative receive-set.
@@ -159,7 +159,7 @@ func (c *client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 
 	// Prepare a value to broadcast in the second TLCR invocation,
 	// indicating which proposals we received from the first.
-	v1 := Val{R: make(Set)}
+	v1 := Value{R: make(Set)}
 	for i, v := range v0r {
 		v1.R[i] = v.Hp
 	}
@@ -185,15 +185,15 @@ func (c *client) tlcb(node Node, s Step, v0 Val) (Val, Set, Set) {
 // tlcr implements the TLCR algorithm for receive-threshold broadcast,
 // each requiring a single TLC time-step.
 //
-func (c *client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
+func (c *client) tlcr(node Node, s Step, v Value) (Value, map[Node]Value) {
 
 	// Create our key/value cache map for step s if not already created
 	if _, ok := c.kvc[s]; !ok {
-		c.kvc[s] = make(map[Node]Val)
+		c.kvc[s] = make(map[Node]Value)
 	}
 
 	// Try to write potential value v, then read that of the client who won.
-	// If we already found a committed history, ourselves or virally,
+	// If we found a committed history, either ourselves or virally,
 	// then just pretend to do writes until we can synchronize and finish.
 	if c.comh.step == 0 {
 		v, c.comh = c.kv[node].WriteRead(s, v)

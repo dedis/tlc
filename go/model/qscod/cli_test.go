@@ -7,24 +7,30 @@ import "testing"
 
 // Trivial intra-process key-value store implementation for testing
 type testStore struct {
-	mut  sync.Mutex   // synchronization for testStore state
-	kv   map[Step]Val // the key/value map
-	comh Hist         // latest history known to be committed
+	mut  sync.Mutex     // synchronization for testStore state
+	kv   map[Step]Value // the key/value map
+	comh Hist           // latest history known to be committed
 }
 
 // WriteRead implements the Store interface with a simple intra-process map.
-func (ts *testStore) WriteRead(s Step, v Val) (Val, Hist) {
+func (ts *testStore) WriteRead(s Step, v Value) (Value, Hist) {
 	ts.mut.Lock()
 	defer ts.mut.Unlock()
-	if s < ts.comh.step { // step s is too old?
+
+	// If the requested step s is too old, return last committed history
+	if s < ts.comh.step {
 		return v, ts.comh
 	}
+
+	// Write value v if not already written, then return the actual value.
 	if _, ok := ts.kv[s]; !ok { // no client wrote a value yet for s?
 		ts.kv[s] = v // write-once
 	}
 	return ts.kv[s], Hist{} // Return the winning value in any case
 }
 
+// Committed indicates to us that earlier steps can be garbage-collected.
+// For testing we don't actually garbage-collect but just mark them off-limits.
 func (ts *testStore) Committed(comh Hist) {
 	ts.mut.Lock()
 	if ts.comh.step < comh.step {
@@ -89,7 +95,7 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 		// Create a test key/value store representing each node
 		kv := make([]Store, nnode)
 		for i := range kv {
-			kv[i] = &testStore{kv: make(map[Step]Val)}
+			kv[i] = &testStore{kv: make(map[Step]Value)}
 		}
 
 		// Create a reference total order for safety checking
