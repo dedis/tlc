@@ -37,7 +37,8 @@ func (S Set) best() (*Hist, bool) {
 // A Store's keys are integer TLC time-steps,
 // and its values are Val structures.
 type Store interface {
-	WriteRead(step Step, value Val, commit bool) (Step, Val)
+	WriteRead(step Step, value Val) (actual Val, comh *Hist)
+	Committed(comh *Hist)
 }
 
 // Val represents the values that a consensus node's key/value Store maps to.
@@ -83,13 +84,15 @@ func Commit(tr, ts int, kv []Store, rv func() int64,
 	}
 	c.mut.Unlock()
 
-	return c.comh // Return next committed history we learned
+	// Return the next committed history we learned
+	return c.comh
 }
 
 // thread represents the main loop of a client's thread
 // that represents and drives a particular consensus group node.
 func (c *client) thread(node Node, pref string, s Step, h *Hist) {
 	c.mut.Lock() // Keep state locked while we're not waiting
+	defer c.mut.Unlock()
 
 	// Run until we find a commitment at a sufficiently high step number,
 	// and then until we're even with all the other client threads.
@@ -114,14 +117,14 @@ func (c *client) thread(node Node, pref string, s Step, h *Hist) {
 
 		h, _ = R2.best()  // some best confirmed proposal from R2
 		b, u := R0.best() // is there a uniquely-best proposal in R0?
-		if B2[h.node] == h && b == h && u {
-			c.comh = h         // record that h is committed
-			c.cond.Broadcast() // signal the main thread
+		if B2[h.node] == h && b == h && u && c.comh == nil {
+			c.comh = h              // record that h is committed
+			c.cond.Broadcast()      // signal the main thread
+			c.kv[node].Committed(h) // garbage-collect older steps
 		}
 
 		s += 4 // Two TLCB instances took two time-steps each
 	}
-	c.mut.Unlock()
 }
 
 // tlcb implements the TLCB algorithm for full-spread threshold broadcast,
@@ -178,14 +181,11 @@ func (c *client) tlcr(node Node, s Step, v Val) (Val, map[Node]Val) {
 		c.kvc[s] = make(map[Node]Val)
 	}
 
-	// Try to write potential value v, then read that of the client who won
-	sv, v := c.kv[node].WriteRead(s, v, v.H == c.comh)
-	if sv > s { // Need to catch up to someone else who's ahead
-		println("node", node, "catching up from", s, "to", sv)
-		if c.comh == nil || c.comh.step < sv {
-			c.comh = v.H // committed history to skip forward to
-		}
-		v = Val{} // finish this step with an empty value
+	// Try to write potential value v, then read that of the client who won.
+	// If we already found a committed history, ourselves or virally,
+	// then just pretend to do writes until we can synchronize and finish.
+	if c.comh == nil {
+		v, c.comh = c.kv[node].WriteRead(s, v)
 	}
 	c.kvc[s][node] = v // save value v in our local cache
 

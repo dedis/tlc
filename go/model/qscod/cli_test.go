@@ -7,19 +7,29 @@ import "testing"
 
 // Trivial intra-process key-value store implementation for testing
 type testStore struct {
-	kv  map[Step]Val
-	mut sync.Mutex
+	mut  sync.Mutex   // synchronization for testStore state
+	kv   map[Step]Val // the key/value map
+	comh *Hist        // latest history known to be committed
 }
 
 // WriteRead implements the Store interface with a simple intra-process map.
-func (ts *testStore) WriteRead(s Step, v Val, committed bool) (Step, Val) {
+func (ts *testStore) WriteRead(s Step, v Val) (Val, *Hist) {
 	ts.mut.Lock()
+	defer ts.mut.Unlock()
+	if ts.comh != nil && s < ts.comh.step { // step s is too old?
+		return v, ts.comh
+	}
 	if _, ok := ts.kv[s]; !ok { // no client wrote a value yet for s?
 		ts.kv[s] = v // write-once
 	}
 	v = ts.kv[s] // Read the winning value in any case
-	ts.mut.Unlock()
-	return s, v
+	return v, nil
+}
+
+func (ts *testStore) Committed(comh *Hist) {
+	if ts.comh == nil || ts.comh.step < comh.step {
+		ts.comh = comh
+	}
 }
 
 // Object to record the common total order and verify it for consistency
@@ -94,6 +104,7 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 
 func TestClient(t *testing.T) {
 	testRun(t, 1, 3, 1, 1000, 100) // Standard f=1 case
+	testRun(t, 1, 3, 2, 1000, 100)
 	testRun(t, 1, 3, 10, 1000, 100)
 	testRun(t, 1, 3, 20, 1000, 100)
 	testRun(t, 1, 3, 50, 1000, 100)
