@@ -41,15 +41,20 @@ type testOrder struct {
 // When a client reports a history h has been committed,
 // record that in the testOrder and check it for global consistency.
 func (to *testOrder) committed(t *testing.T, h *Hist) {
-	if int(h.step/4) >= len(to.hs) { // one new proposal every 4 steps
-		if h.pred != nil {
-			to.committed(t, h.pred) // first check h's predecessor
-		}
-		to.hs = append(to.hs, h)
+	to.mut.Lock()
+	defer to.mut.Unlock()
+
+	// Ensure history slice is long enough
+	for h.step >= Step(len(to.hs)) {
+		to.hs = append(to.hs, nil)
 	}
-	if to.hs[h.step/4] != h {
-		t.Errorf("%v UNSAFE %v != %v", h.step/4, h.msg,
-			to.hs[h.step/4].msg)
+
+	// Check commit consistency across all concurrent clients
+	switch {
+	case to.hs[h.step] == nil:
+		to.hs[h.step] = h
+	case to.hs[h.step] != h:
+		t.Errorf("%v UNSAFE %v != %v", h.step, h.msg, to.hs[h.step].msg)
 	}
 }
 
@@ -69,9 +74,7 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 		h = Commit(2*nfail, nfail+1, kv, rv, pref, h)
 		//println("thread", self, "got commit", h.step, h.msg)
 
-		to.mut.Lock()
 		to.committed(t, h) // consistency-check history h
-		to.mut.Unlock()
 	}
 	wg.Done()
 }

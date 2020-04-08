@@ -11,7 +11,6 @@ type Step int64 // Step represents a TLC time-step counting from 0
 type Hist struct {
 	node Node   // Node that proposed this history
 	step Step   // TLC time-step number this history is for
-	pred *Hist  // Predecessor in previous time-step
 	msg  string // Application message in this proposal
 	pri  int64  // Random priority value
 }
@@ -36,6 +35,15 @@ func (S Set) best() (*Hist, bool) {
 // representing the persistent state of each of the n consensus group members.
 // A Store's keys are integer TLC time-steps,
 // and its values are Val structures.
+//
+// WriteRead(step, value) attempts to write value to the store at step,
+// returning the first value written by any client and nil for comh.
+// If the requested step has been aged out of the store,
+// returns the input value unmodified and the last committed history.
+//
+// Committed(comh) informs the Store that history comh has been committed,
+// and all key/value pairs before comh.step may be aged out of the store.
+//
 type Store interface {
 	WriteRead(step Step, value Val) (actual Val, comh *Hist)
 	Committed(comh *Hist)
@@ -102,7 +110,7 @@ func (c *client) thread(node Node, pref string, s Step, h *Hist) {
 		// Prepare a proposal containing the message msg
 		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Val{H: h, Hp: &Hist{node, s, h, pref, c.rv()}}
+		v0 := Val{H: h, Hp: &Hist{node, s, pref, c.rv()}}
 		v0, R0, B0 := c.tlcb(node, s+0, v0)
 		h = v0.H // correct our state from v0 read
 
