@@ -13,20 +13,20 @@ type testStore struct {
 }
 
 // WriteRead implements the Store interface with a simple intra-process map.
-func (ts *testStore) WriteRead(s Step, v Value) (Value, Hist) {
+func (ts *testStore) WriteRead(step Step, v Value) (Value, Hist) {
 	ts.mut.Lock()
 	defer ts.mut.Unlock()
 
 	// If the requested step s is too old, return last committed history
-	if s < ts.comh.Step {
+	if step < ts.comh.Step {
 		return v, ts.comh
 	}
 
 	// Write value v if not already written, then return the actual value.
-	if _, ok := ts.kv[s]; !ok { // no client wrote a value yet for s?
-		ts.kv[s] = v // write-once
+	if _, ok := ts.kv[step]; !ok { // no client wrote a value yet for s?
+		ts.kv[step] = v // write-once
 	}
-	return ts.kv[s], Hist{} // Return the winning value in any case
+	return ts.kv[step], Hist{} // Return the winning value in any case
 }
 
 // Committed indicates to us that earlier steps can be garbage-collected.
@@ -102,9 +102,8 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 		to := &testOrder{}
 
 		// Simulate the appropriate number of concurrent clients
-		cli := make([]client, ncli)
 		wg := &sync.WaitGroup{}
-		for i := range cli {
+		for i := 0; i < ncli; i++ {
 			wg.Add(1)
 			go testCli(t, i, nfail, ncommits, maxpri, kv, to, wg)
 		}
