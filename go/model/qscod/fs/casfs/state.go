@@ -1,6 +1,11 @@
 // Package casfs uses simple atomic POSIX file system operations,
 // with no locking, to create simple versioned registers supporting
 // atomic compare-and-set (CAS) functionality.
+// It supports garbage-collection of old register versions
+// by using atomic POSIX directory-manipulation operations.
+//
+// XXX describe in more detail
+//
 package casfs
 
 import (
@@ -11,10 +16,14 @@ import (
 	"errors"
 
 	"github.com/bford/cofo/cbe"
+	"github.com/dedis/tlc/go/model/qscod/fs/util"
 )
 
 
 const versPerGen = 100	// Number of versions between generation subdirectories
+
+const genFormat = "gen-%d"	// Format for generation directory names
+const verFormat = "ver-%d"	// Format for register version file names
 
 
 // A register version number is just a 64-bit integer.
@@ -35,15 +44,15 @@ type State struct {
 // Initialize State to refer to a casfs register at a given file system path.
 // If create is true, create the designated directory if it doesn't exist.
 // If excl is true, fail if the designated directory already exists.
-func (s *State) Init(path string, create, excl bool) error {
-	*s = State{path: string}	// Set path and clear cached state
+func (st *State) Init(path string, create, excl bool) error {
+	*st = State{path: path}	// Set path and clear cached state
 
 	// First check if the path already exists and is a directory.
-	st, err := os.Stat(path)
+	stat, err := os.Stat(path)
 	if err != nil && (!os.IsExist(err) || !create) {
 		return err
 	}
-	if err == nil && !st.IsDir() {
+	if err == nil && !stat.IsDir() {
 		return os.ErrExist
 	}
 
@@ -66,85 +75,94 @@ func (s *State) Init(path string, create, excl bool) error {
 // latest register version on the file system.
 // Of course the file system may be a constantly-moving target
 // so the refreshed state could be stale again immediately on return.
-func (s *State) refresh() error {
+func (st *State) refresh() error {
 
 	// First find the highest-numbered state generation subdirectory
-	genver, genname, err := scan(s.path, "gen-%d")
+	genver, genname, _, err := scan(st.path, genFormat, 0)
 	if err != nil {
 		return err
 	}
 
 	// Then find the highest-numbered register version in that subdirectory
-	genpath := filepath.Join(s.path, genname)
-	regver, regname, err := scan(genpath, "ver-%d")
+	genpath := filepath.Join(st.path, genname)
+	regver, regname, _, err := scan(genpath, verFormat, 0)
 	if err != nil {
 		return err
 	}
 
 	// Read that highest register version file
-	regpath := filepath.Join(genpath, regname)
-	val, nextGen, err := readVer(regpath)
+	val, nextGen, err := readVerFile(genpath, regname)
 	if err != nil {
 		return err
 	}
 
-	s.genVer = genver
-	s.genPath = genpath
+	st.genVer = genver
+	st.genPath = genpath
 
-	s.ver = regver
-	s.val = val
-	s.nxg = nextGen
+	st.ver = regver
+	st.val = val
+	st.nxg = nextGen
 
 	return nil
 }
 
 // Scan a directory for highest-numbered file or subdirectory matching format.
-func scan(path, format string) (maxver Version, maxname string, err error) {
+func scan(path, format string, upTo Version) (
+	maxver Version, maxname string, names []string, err error) {
 
 	// Scan the casfs directory for the highest-numbered subdirectory.
-	dir, err := os.Open(s.path)
+	dir, err := os.Open(path)
 	if err != nil {
-		return 0, "", err
+		return 0, "", nil, err
 	}
-	info, err := os.Readdir(0)
+	info, err := dir.Readdir(0)
 	if err != nil {
-		return 0, "", err
+		return 0, "", nil, err
 	}
 
 	// Find the highest-numbered generation subdirectory
-	var ver, maxver Version
-	var maxname string
 	for i := range info {
 		name := info[i].Name()
+
+		// Scan the version number embedded in the name, if any,
+		// and confirm that the filename exactly matches the format.
+		var ver Version
 		n, err := fmt.Sscanf(name, format, &ver)
-		if n < 1 || err != nil || ver <= maxver {
+		if n < 1 || err != nil || name != fmt.Sprintf(format, ver) {
 			continue
 		}
 
-		// Confirm that the filename exactly matches the format
-		if name == fmt.Sprintf(format, ver) {
+		// Find the highest extant version number
+		// (no greater than upTo, if upTo is nonzero)
+		if ver > maxver && (upTo == 0 || ver <= upTo) {
 			maxver, maxname = ver, name
+		}
+
+		// If upTo is nonzero, collect all the matching names.
+		if upTo > 0 {
+			names = append(names, name)
 		}
 	}
 	if maxver == 0 {	// No highest version!? oops
-		return 0, "", os.ErrNotExist
+		return 0, "", nil, os.ErrNotExist
 	}
-	return maxver, maxname, nil
+	return
 }
 
 // Read and parse the register version file at regpath.
-func readVer(regPath string) (state, nextGen string, err error) {
+func readVerFile(genPath, verName string) (state, nextGen string, err error) {
 
+	regPath := filepath.Join(genPath, verName)
 	b, err := ioutil.ReadFile(regPath)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	// The encoded value is always first and not optional
 	val, b, err := cbe.Decode(b)
 	if err != nil {
 		println("corrupt casfs version file " + regPath)
-		return err
+		return "", "", err
 	}
 
 	// The encoded next-generation directory name is optional
@@ -157,45 +175,50 @@ func readVer(regPath string) (state, nextGen string, err error) {
 // Read the current casfs register state and version number.
 // Of course this may change at any time on the underlying file system,
 // so the caller must assume it might be stale immediately.
-func Read() (val string, ver Version, err error) {
+func (st *State) Read() (val string, ver Version, err error) {
 
-	s.refresh()
+	if err := st.refresh(); err != nil {
+		return "", 0, err
+	}
+	return st.val, st.ver, nil
 }
 
 // Write newVal atomically only if the current value still equals oldVal.
-func (s *State) WriteIfEqual(newVal string, oldVal string) (err error) {
+//
+// XXX maybe don't need? don't export for now
+func (st *State) writeIfEqual(newVal string, oldVal string) (err error) {
 
 	// Reject the write if it doesn't even match our cached state
-	if oldVal != s.val {
+	if oldVal != st.val {
 		return ErrChanged
 	}
 
-	return writeVer(newVal)
+	return st.writeVer(newVal)
 }
 
-// Write newVal atomically only if the version number is still oldVer.
-func WriteIfVersion(newVal string, oldVer Version) (err error) {
+// Write newVal atomically only if the current version number is still oldVer.
+func (st *State) Write(newVal string, oldVer Version) (err error) {
 
 	// Reject the write if it doesn't even match our cached state
-	if oldVer != s.ver {
+	if oldVer != st.ver {
 		return ErrChanged
 	}
 
-	return writeVer(newVal)
+	return st.writeVer(newVal)
 }
 
 // Write newVal to the next register version after the current cached version
-func (s *State) writeVer(newVal string) (err error) {
+func (st *State) writeVer(newVal string) (err error) {
 
-	newVer = s.ver + 1
-	newVerName = io.Sprintf("ver-%d", newVer)
+	newVer := st.ver + 1
+	newVerName := fmt.Sprintf(verFormat, newVer)
 
 	// Should this register version start a new generation?
 	tmpGenName := ""
 	if newVer % versPerGen == 0 {
 		// Prepare the new generation in a temporary directory first
-		pattern := fmt.Sprintf("gen-%d-tmp*", newVer)
-		tmpPath, err := ioutil.TempDir(s.path, pattern)
+		pattern := fmt.Sprintf(genFormat + "-tmp*", newVer)
+		tmpPath, err := ioutil.TempDir(st.path, pattern)
 		if err != nil {
 			return err
 		}
@@ -205,22 +228,21 @@ func (s *State) writeVer(newVal string) (err error) {
 		tmpGenName = filepath.Base(tmpPath)
 
 		// Write the new register version in the new directory (too)
-		tmpVerName := filepath.Join(tmpPath, newVerName)
-		err := writeVerFile(tmpPath, newVerName, newVal, tmpGenName)
+		err = writeVerFile(tmpPath, newVerName, newVal, tmpGenName)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Write version into the (old) generation directory
-	err := writeVerFile(s.genPath, newVerName, newVal, tmpGenName)
+	err = writeVerFile(st.genPath, newVerName, newVal, tmpGenName)
 	if err != nil && !os.IsExist(err) {
 		return err
 	}
 
 	// Read back whatever register version file actually got written,
 	// which might be from someone else's write that won over ours.
-	newVal, tmpGenName, err = readVerFile(s.genPath, newVerName)
+	newVal, tmpGenName, err = readVerFile(st.genPath, newVerName)
 	if err != nil {
 		return err
 	}
@@ -231,8 +253,9 @@ func (s *State) writeVer(newVal string) (err error) {
 	// it fails if either the old temporary directory no longer exists
 	// or if a directory with the new name already exists.
 	if tmpGenName != "" {
-		oldGenPath = filepath.Join(s.path, tmpGenName)
-		newGenPath = filepath.Join(s.path, fmt.Sprintf("gen-%d", newVer))
+		oldGenPath := filepath.Join(st.path, tmpGenName)
+		newGenPath := filepath.Join(st.path,
+				fmt.Sprintf(genFormat, newVer))
 		err := os.Rename(oldGenPath, newGenPath)
 		if !os.IsExist(err) && !os.IsNotExist(err) {
 			return err
@@ -240,20 +263,20 @@ func (s *State) writeVer(newVal string) (err error) {
 	}
 
 	// Update our cached state
-	s.ver = newVer
-	s.val = newVal
-	s.nxg = tmpGenName
+	st.ver = newVer
+	st.val = newVal
+	st.nxg = tmpGenName
 	return nil
 }
 
-func (s *State) writeVerFile(dirPath, verName, val, nextGen string) error {
+func writeVerFile(genPath, verName, val, nextGen string) error {
 
 	// Encode the new register version file
-	b := cbe.Encode(nil, val)
+	b := cbe.Encode(nil, []byte(val))
 	b = cbe.Encode(b, []byte(nextGen))
 
 	// Write it atomically
-	verPath = filepath.Join(dirPath, verName)
+	verPath := filepath.Join(genPath, verName)
 	if err := util.WriteFileOnce(verPath, b, 0644); err != nil {
 		return err
 	}
@@ -261,8 +284,50 @@ func (s *State) writeVerFile(dirPath, verName, val, nextGen string) error {
 	return nil
 }
 
+// Expire deletes file system state for versions older than before.
+// Attempts either to read or to write expired versions will fail.
+//
+func (st *State) Expire(before Version) (err error) {
 
-// WriteIfEqual and WriteIfVersion return ErrChanged if the casfs register
+	// Find all existing generation directories up to version 'before'
+	maxver, maxname, names, err := scan(st.path, genFormat, before)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 || maxver <= 0 || maxver > before {
+		panic("shouldn't happen")
+	}
+
+	// Delete all generation directories before 'highest',
+	// since those can only contain versions strictly before 'highest'.
+	for _, name := range names {
+		if name != maxname {
+			genPath := filepath.Join(st.path, name)
+			e := atomicRemoveAll(genPath)
+			if e != nil && err == nil {
+				err = e
+			}
+		}
+	}
+
+	return err
+}
+
+// Atomically remove the directory at path,
+// ensuring that no one sees inconsistent states within it,
+// by renaming it before starting to delete its contents.
+func atomicRemoveAll(path string) error {
+
+	tmpPath := fmt.Sprintf("%s.old", path)
+	if err := os.Rename(path, tmpPath); err != nil {
+		return err
+	}
+
+	return os.RemoveAll(tmpPath)
+}
+
+
+// State.Write returns ErrChanged if the casfs register
 // has changed from the specified state value or version, respectively. 
 var ErrChanged = errors.New("casfs register changed")
 
