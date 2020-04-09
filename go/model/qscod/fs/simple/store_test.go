@@ -1,89 +1,14 @@
-package fs
+package simple
 
 import (
-	"bytes"
-	"encoding/gob"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 
 	. "github.com/dedis/tlc/go/model/qscod"
 )
-
-// Encode a Value for transmission.
-// Currently uses GOB encoding for simplicity,
-// but we should change that to something not Go-specific..
-func encodeValue(v Value) ([]byte, error) {
-	buf := &bytes.Buffer{}
-	enc := gob.NewEncoder(buf)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// Decode a Value from its serialized format.
-func decodeValue(b []byte) (v Value, err error) {
-	r := bytes.NewReader(b)
-	dec := gob.NewDecoder(r)
-	err = dec.Decode(&v)
-	return
-}
-
-// Simple file system key/value Store for QSCOD,
-// with no support for garbage collection.
-//
-// Intended only for education, testing, and experimentation,
-// not for any production use.
-//
-type simpleStore struct {
-	dirPath string // directory containing per-step files
-	comh    Hist   // latest history known to be committed
-}
-
-func (ss *simpleStore) Init(path string) error {
-	ss.dirPath = path
-	return os.Mkdir(path, 0744)
-}
-
-func (ss *simpleStore) WriteRead(step Step, v Value) (rv Value, rh Hist) {
-
-	// Serialize the proposed value
-	buf, err := encodeValue(v)
-	if err != nil {
-		panic(err.Error()) // XXX
-	}
-
-	// Try to write the file, ignoring already-exists errors
-	name := fmt.Sprintf("ver-%d", step)
-	path := filepath.Join(ss.dirPath, name)
-	err = WriteFileOnce(path, buf, 0666)
-	if err != nil && !os.IsExist(err) {
-		panic(err.Error()) // XXX
-	}
-
-	// Read back whatever file was successfully written first there
-	rbuf, err := ioutil.ReadFile(path)
-	if err != nil {
-		panic(err.Error()) // XXX
-	}
-
-	// Deserialize the value read
-	rv, err = decodeValue(rbuf)
-	if err != nil {
-		panic(err.Error()) // XXX
-	}
-
-	return rv, rh
-}
-
-func (ss *simpleStore) Committed(comh Hist) {
-	// do nothing - no garbage collection
-}
 
 // Object to record the common total order and verify it for consistency
 type testOrder struct {
@@ -132,10 +57,6 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	wg.Done()
 }
 
-func testPath(node int) string {
-	return fmt.Sprintf("test-store-%d", node)
-}
-
 //  Run a consensus test case with the specified parameters.
 func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 	desc := fmt.Sprintf("F=%v,N=%v,Clients=%v,Commits=%v,Tickets=%v",
@@ -145,14 +66,21 @@ func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
 		// Create a test key/value store representing each node
 		kv := make([]Store, nnode)
 		for i := range kv {
-			ss := &simpleStore{}
-			path := testPath(i)
+			path := fmt.Sprintf("test-store-%d", i)
+			ss := &FileStore{path}
+			kv[i] = ss
+
+			// Remove the test directory if one is left-over
+			// from a previous test run.
 			os.RemoveAll(path)
-			if err := ss.Init(path); err != nil {
+
+			// Create the test directory afresh.
+			if err := os.Mkdir(path, 0744); err != nil {
 				t.Fatal(err)
 			}
+
+			// Clean it up once the test is done.
 			defer os.RemoveAll(path)
-			kv[i] = ss
 		}
 
 		// Create a reference total order for safety checking

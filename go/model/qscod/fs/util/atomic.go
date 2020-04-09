@@ -1,6 +1,6 @@
 // This package provides low-level utility operations
 // needed by casfs.
-package fs
+package util
 
 import (
 	"errors"
