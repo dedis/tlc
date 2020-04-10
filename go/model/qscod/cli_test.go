@@ -9,7 +9,7 @@ import "testing"
 type testStore struct {
 	mut  sync.Mutex     // synchronization for testStore state
 	kv   map[Step]Value // the key/value map
-	comh Hist           // latest history known to be committed
+	lcom Hist           // latest history known to be committed
 }
 
 // WriteRead implements the Store interface with a simple intra-process map.
@@ -18,25 +18,21 @@ func (ts *testStore) WriteRead(step Step, v Value) (Value, Hist) {
 	defer ts.mut.Unlock()
 
 	// If the requested step s is too old, return last committed history
-	if step < ts.comh.Step {
-		return v, ts.comh
+	if step < ts.lcom.Step {
+		return v, ts.lcom
 	}
 
 	// Write value v if not already written, then return the actual value.
 	if _, ok := ts.kv[step]; !ok { // no client wrote a value yet for s?
 		ts.kv[step] = v // write-once
+
+		// Update our record of the last-known committed history,
+		// to simulate garbage-collection for testing purposes.
+		if ts.lcom.Step < v.C.Step {
+			ts.lcom = v.C
+		}
 	}
 	return ts.kv[step], Hist{} // Return the winning value in any case
-}
-
-// Committed indicates to us that earlier steps can be garbage-collected.
-// For testing we don't actually garbage-collect but just mark them off-limits.
-func (ts *testStore) Committed(comh Hist) {
-	ts.mut.Lock()
-	if ts.comh.Step < comh.Step {
-		ts.comh = comh
-	}
-	ts.mut.Unlock()
 }
 
 // Object to record the common total order and verify it for consistency
