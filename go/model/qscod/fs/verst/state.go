@@ -69,13 +69,12 @@ type Version int64
 
 // State holds cached state for a single verst versioned register.
 type State struct {
-	path string // Base pathname of directory containing register state
-
+	path    string  // Base pathname of directory containing register state
 	genVer  Version // Version number of highest generation subdirectory
 	genPath string  // Pathname to generation subdirectory
-
-	ver Version // Highest register version known to exist already
-	val string  // Cached register value for highest known version
+	ver     Version // Highest register version known to exist already
+	val     string  // Cached register value for highest known version
+	expVer  Version // Version number before which state is expired
 }
 
 // Initialize State to refer to a verst register at a given file system path.
@@ -203,7 +202,7 @@ func scan(path, format string, upTo Version) (
 		}
 
 		// If upTo is nonzero, collect all the matching names.
-		if upTo > 0 {
+		if upTo > 0 && ver <= upTo {
 			names = append(names, name)
 		}
 	}
@@ -376,11 +375,15 @@ func (st *State) WriteVersion(ver Version, val string) (err error) {
 			return err
 		}
 
+		// It's a good time to expire old generations when feasible
+		st.expireOld()
+
+		// Update our cached generation state
 		st.genVer = ver
 		st.genPath = newGenPath
 	}
 
-	// Update our cached state
+	// Update our cached version state
 	st.ver = ver
 	st.val = val
 	return nil
@@ -401,35 +404,38 @@ func writeVerFile(genPath, verName, val, nextGen string) error {
 	return nil
 }
 
-// Expire deletes file system state for versions older than before.
+// Expire indicates that state versions earlier than before may be deleted.
+// It does not necessarily delete these older versions immediately, however.
 // Attempts either to read or to write expired versions will fail.
 //
-func (st *State) Expire(before Version) (err error) {
+func (st *State) Expire(before Version) {
+	if st.expVer < before {
+		st.expVer = before
+	}
+}
 
-	panic("XXX")
+// Actually try to delete expired versions.
+// We do this only about once per generation for efficiency.
+func (st *State) expireOld() {
 
 	// Find all existing generation directories up to version 'before'
-	maxver, maxname, names, err := scan(st.path, genFormat, before)
-	if err != nil {
-		return err
+	maxVer, maxName, names, err := scan(st.path, genFormat, st.expVer)
+	if err != nil || len(names) == 0 {
+		return // ignore errors, e.g., no expired generations
 	}
-	if len(names) == 0 || maxver <= 0 || maxver > before {
+	if maxVer < 0 || maxVer > st.expVer {
+		println("expireOld oops", len(names), maxVer, st.expVer)
 		panic("shouldn't happen")
 	}
 
-	// Delete all generation directories before 'highest',
-	// since those can only contain versions strictly before 'highest'.
-	for _, name := range names {
-		if name != maxname {
-			genPath := filepath.Join(st.path, name)
-			e := atomicRemoveAll(genPath)
-			if e != nil && err == nil {
-				err = e
-			}
+	// Delete all generation directories before maxVer,
+	// since those can only contain versions strictly before maxVer.
+	for _, genName := range names {
+		if genName != maxName {
+			genPath := filepath.Join(st.path, genName)
+			atomicRemoveAll(genPath)
 		}
 	}
-
-	return err
 }
 
 // Atomically remove the directory at path,
