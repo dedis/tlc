@@ -12,24 +12,24 @@ import (
 
 // Object to record the common total order and verify it for consistency
 type testOrder struct {
-	hs  []Hist     // all history known to be committed so far
+	hs  []Head     // all history known to be committed so far
 	mut sync.Mutex // mutex protecting this reference order
 }
 
 // When a client reports a history h has been committed,
 // record that in the testOrder and check it for global consistency.
-func (to *testOrder) committed(t *testing.T, h Hist) {
+func (to *testOrder) committed(t *testing.T, h Head) {
 	to.mut.Lock()
 	defer to.mut.Unlock()
 
 	// Ensure history slice is long enough
 	for h.Step >= Step(len(to.hs)) {
-		to.hs = append(to.hs, Hist{})
+		to.hs = append(to.hs, Head{})
 	}
 
 	// Check commit consistency across all concurrent clients
 	switch {
-	case to.hs[h.Step] == Hist{}:
+	case to.hs[h.Step] == Head{}:
 		to.hs[h.Step] = h
 	case to.hs[h.Step] != h:
 		t.Errorf("UNSAFE at %v:\n%+v\n%+v", h.Step, h, to.hs[h.Step])
@@ -43,7 +43,7 @@ func testCli(t *testing.T, self, nfail, ncom, maxpri int,
 	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
 
 	// Commit ncom messages, and consistency-check each commitment.
-	h := Hist{}
+	h := Head{}
 	for i := 0; i < ncom; i++ {
 
 		// Start the test client with appropriate parameters assuming

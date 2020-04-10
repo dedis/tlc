@@ -7,8 +7,8 @@ import "sync"
 type Node int   // Node represents a node number from 0 through n-1
 type Step int64 // Step represents a TLC time-step counting from 0
 
-// Hist represents a view of history proposed by some node in a QSC round.
-type Hist struct {
+// Head represents a view of history proposed by some node in a QSC round.
+type Head struct {
 	Step Step   // TLC time-step of last successful commit in this view
 	Data string // Application data committed at that step in this view
 }
@@ -19,19 +19,18 @@ type Hist struct {
 // and its values are Value structures.
 //
 // WriteRead(step, value) attempts to write value to the store at step,
-// returning the first value written by any client and Hist{} for comh.
+// returning the first value written by any client and Head{} for comh.
 // If the requested step has been aged out of the store,
-// returns the input value unmodified and the last committed history.
-// Value.C in each stored value indicates some recent committed history.
+// returns the input value unmodified and the last committed Head.
 //
 type Store interface {
-	WriteRead(step Step, value Value) (actual Value, comh Hist)
+	WriteRead(step Step, value Value) (actual Value, comh Head)
 }
 
 // Value represents the values that a consensus node's key/value Store maps to.
 type Value struct {
 	Pri  int64 // Random priority for this proposal
-	C, P Hist  // Last-committed and newly-proposed history views
+	C, P Head  // Last-committed and newly-proposed history views
 	R, B Set   // Read set and broadcast set from TLCB
 }
 
@@ -60,7 +59,7 @@ type client struct {
 	mut    sync.Mutex              // Mutex protecting this client's state
 	cond   *sync.Cond              // For awaiting threshold conditions
 	kvc    map[Step]map[Node]Value // Cache of key/value store values
-	rcom   Hist                    // Committed history to return
+	rcom   Head                    // Committed history to return
 }
 
 // Commit starts a client with given configuration parameters,
@@ -68,7 +67,7 @@ type client struct {
 // application-defined message msg until some message commits.
 // Returns the history that successfully committed msg.
 func Commit(tr, ts int, kvStores []Store, randomPri func() int64,
-	proposedData string, committed Hist) Hist {
+	proposedData string, committed Head) Head {
 
 	// Initialize the client's synchronization and key/value cache state.
 	c := &client{tr: tr, ts: ts, kv: kvStores, rv: randomPri}
@@ -96,7 +95,7 @@ func Commit(tr, ts int, kvStores []Store, randomPri func() int64,
 
 // thread represents the main loop of a client's thread
 // that represents and drives a particular consensus group node.
-func (c *client) thread(node Node, pref string, step Step, lcom Hist) {
+func (c *client) thread(node Node, pref string, step Step, lcom Head) {
 	c.mut.Lock() // Keep state locked while we're not waiting
 	defer c.mut.Unlock()
 
@@ -108,7 +107,7 @@ func (c *client) thread(node Node, pref string, step Step, lcom Hist) {
 		// Prepare a proposal containing the message msg
 		// that this client would like to commit,
 		// and invoke TLCB to (try to) issue that proposal on this node.
-		v0 := Value{Pri: c.rv(), C: lcom, P: Hist{step, pref}}
+		v0 := Value{Pri: c.rv(), C: lcom, P: Head{step, pref}}
 		v0, R0, B0 := c.tlcb(node, step, v0)
 
 		// Invoke TLCB again to re-broadcast the best eligible proposal

@@ -30,7 +30,7 @@ type FileStore struct {
 // A more robust approach suited to asynchronous consensus would be
 // to log the error then retry in an exponential-backoff loop.
 //
-func (fs *FileStore) WriteRead(step Step, v Value) (rv Value, rh Hist) {
+func (fs *FileStore) WriteRead(step Step, v Value) (rv Value, rh Head) {
 
 	// Serialize the proposed value
 	buf, err := util.EncodeValue(v)
@@ -65,6 +65,6 @@ func (fs *FileStore) WriteRead(step Step, v Value) (rv Value, rh Hist) {
 // so we can garbage-collect entries before it in the key/value store.
 // But this Store does not implement garbage-collection.
 //
-func (fs *FileStore) Committed(comh Hist) {
+func (fs *FileStore) Committed(comh Head) {
 	// do nothing - no garbage collection
 }

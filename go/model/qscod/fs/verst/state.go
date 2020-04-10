@@ -17,7 +17,7 @@
 // e.g., metadata rather than bulk data, appropriate for Go strings.
 // and reading/writing all at once as atomic units.
 // Bulk data should be handled by other means.
-// 
+//
 // The verst package uses simple atomic POSIX file system operations,
 // with no locking, to manage concurrency in the underlying file system.
 // It supports garbage-collection of old state versions
@@ -43,68 +43,71 @@
 // it is not particularly specific to TLC and depends on nothing else in it,
 // and hence might eventually be moved to a more generic home if appropriate.
 //
+// XXX describe the techniques in a bit more detail.
+//
 package verst
 
 import (
-	"os"
 	"fmt"
-	"path/filepath"
 	"io/ioutil"
-	"errors"
+	"os"
+	"path/filepath"
+	//	"errors"
 
 	"github.com/bford/cofo/cbe"
 	"github.com/dedis/tlc/go/model/qscod/fs/util"
 )
 
+//const versPerGen = 100 // Number of versions between generation subdirectories
+const versPerGen = 10 // Number of versions between generation subdirectories
 
-const versPerGen = 100	// Number of versions between generation subdirectories
-
-const genFormat = "gen-%d"	// Format for generation directory names
-const verFormat = "ver-%d"	// Format for register version file names
-
+const genFormat = "gen-%d" // Format for generation directory names
+const verFormat = "ver-%d" // Format for register version file names
 
 // A register version number is just a 64-bit integer.
 type Version int64
 
 // State holds cached state for a single verst versioned register.
 type State struct {
-	path string	// Base pathname of directory containing register state
+	path string // Base pathname of directory containing register state
 
-	genVer Version	// Version number of highest generation subdirectory
-	genPath string	// Pathname to generation subdirectory
+	genVer  Version // Version number of highest generation subdirectory
+	genPath string  // Pathname to generation subdirectory
 
-	ver Version	// Highest register version known to exist already
-	val string	// Cached register value for highest known version
-	nxg string	// Cached next-directory string for highest version
+	ver Version // Highest register version known to exist already
+	val string  // Cached register value for highest known version
 }
 
 // Initialize State to refer to a verst register at a given file system path.
 // If create is true, create the designated directory if it doesn't exist.
 // If excl is true, fail if the designated directory already exists.
 func (st *State) Init(path string, create, excl bool) error {
-	*st = State{path: path}	// Set path and clear cached state
+	*st = State{path: path} // Set path and clear cached state
 
 	// First check if the path already exists and is a directory.
 	stat, err := os.Stat(path)
 	switch {
 	case err == nil && !stat.IsDir():
-		return os.ErrExist	// already exists, but not a directory
+		return os.ErrExist // already exists, but not a directory
 
 	case err == nil && !excl:
-		return st.refresh()	// exists: load our cache from it
+		return st.refresh() // exists: load our cache from it
 
-	case err != nil && (!IsExist(err) || !create):
-		return err	// didn't exist and we can't create it
+	case err != nil && (!IsNotExist(err) || !create):
+		return err // didn't exist and we can't create it
 	}
 
 	// Create and initialize the version state directory,
 	// initially with a temporary name for atomicity.
 	dir, name := filepath.Split(path)
-	tmpPath, err := ioutil.TempDir(dir, name + "-*.tmp")
+	if dir == "" {
+		dir = "." // Ensure dir is nonempty
+	}
+	tmpPath, err := ioutil.TempDir(dir, name+"-*.tmp")
 	if err != nil {
 		return err
 	}
-	defer func() {	// Clean up on return if we can't move it into place
+	defer func() { // Clean up on return if we can't move it into place
 		os.RemoveAll(tmpPath)
 	}()
 
@@ -151,7 +154,7 @@ func (st *State) refresh() error {
 	}
 
 	// Read that highest register version file
-	val, nextGen, err := readVerFile(genpath, regname)
+	val, _, err := readVerFile(genpath, regname)
 	if err != nil {
 		return err
 	}
@@ -161,7 +164,6 @@ func (st *State) refresh() error {
 
 	st.ver = regver
 	st.val = val
-	st.nxg = nextGen
 
 	return nil
 }
@@ -182,6 +184,7 @@ func scan(path, format string, upTo Version) (
 	}
 
 	// Find the highest-numbered generation subdirectory
+	maxver = -1
 	for i := range info {
 		name := info[i].Name()
 
@@ -204,7 +207,7 @@ func scan(path, format string, upTo Version) (
 			names = append(names, name)
 		}
 	}
-	if maxver == 0 {	// No highest version!? oops
+	if maxver < 0 { // No highest version!? oops
 		return 0, "", nil, os.ErrNotExist
 	}
 	return
@@ -251,28 +254,14 @@ func (st *State) ReadLatest() (ver Version, val string, err error) {
 // either because it has never been written or because it has been expired.
 func (st *State) ReadVersion(ver Version) (val string, err error) {
 
-	verName := fmt.Sprintf(verFormat, ver)
-
-	// Optimize for sequential reads of the "next" version
-	if ver >= st.genVer {
-		val, _, err := readVerFile(st.genPath, verName)
-		if err == nil {
-			return val, nil	// success
-		}
-		if !IsNotExist(err) {
-			return "", err	// error other than non-existent
-		}
+	// In the common case of reading back the last-written version,
+	// just return its value from our cache.
+	if ver == st.ver {
+		return st.val, nil
 	}
 
-	// Fallback: scan for the generation containing requested version.
-	_, genName, _, err := scan(st.path, genFormat, ver)
-	if err != nil {
-		return "", err
-	}
-
-	// The requested version should be in directory genname if it exists.
-	genPath := filepath.Join(st.path, genName)
-	val, nxg, err := readVerFile(genPath, verName)
+	// Find and read the appropriate version file
+	val, err = st.readUncached(ver)
 	if err != nil {
 		return "", err
 	}
@@ -281,32 +270,69 @@ func (st *State) ReadVersion(ver Version) (val string, err error) {
 	if ver > st.ver {
 		st.ver = ver
 		st.val = val
-		st.nxg = nxg
-		if nxg != "" {
-			st.genVer = ver
-			st.genPath = filepath.Join(st.path,
-				fmt.Sprintf(genFormat, ver))
-		}
 	}
 
 	return val, nil
+}
+
+func (st *State) readUncached(ver Version) (val string, err error) {
+
+	// Optimize for sequential reads of the "next" version
+	verName := fmt.Sprintf(verFormat, ver)
+	if ver >= st.genVer {
+		val, _, err := readVerFile(st.genPath, verName)
+		if err == nil {
+			return val, nil // success
+		}
+		if !IsNotExist(err) {
+			return "", err // error other than non-existent
+		}
+	}
+
+	// Fallback: scan for the generation containing requested version.
+	//println("readUncached: fallback at", ver)
+	genVer, genName, _, err := scan(st.path, genFormat, ver)
+	if err != nil {
+		return "", err
+	}
+	//println("readUncached: found", ver, "in gen", genVer)
+
+	// The requested version should be in directory genName if it exists.
+	genPath := filepath.Join(st.path, genName)
+	val, _, err = readVerFile(genPath, verName)
+	if err != nil {
+		return "", err
+	}
+
+	// Update our cached generation state
+	if ver >= st.ver {
+		println("moving to generation", genVer, "at ver", ver)
+		st.genVer = genVer
+		st.genPath = genPath
+	}
+
+	return val, err
 }
 
 // Write version ver with associated value val if ver is not yet written.
 func (st *State) WriteVersion(ver Version, val string) (err error) {
 
 	// The next version written should always be one higher than the last.
-	if ver != st.ver + 1 {
-		return errors.New("versions must be written in-order")
+	switch {
+	case ver <= st.ver:
+		return ErrExist
+	case ver > st.ver+1:
+		println("WriteVersion", ver, "after", st.ver, "gen", st.genPath)
+		//return errors.New("versions must be written in-order")
 	}
 	verName := fmt.Sprintf(verFormat, ver)
 
 	// Should this register version start a new generation?
 	tmpGenName := ""
-	if ver % versPerGen == 0 {
+	if ver%versPerGen == 0 {
 
 		// Prepare the new generation in a temporary directory first
-		pattern := fmt.Sprintf(genFormat + "-*.tmp", ver)
+		pattern := fmt.Sprintf(genFormat+"-*.tmp", ver)
 		tmpPath, err := ioutil.TempDir(st.path, pattern)
 		if err != nil {
 			return err
@@ -344,17 +370,19 @@ func (st *State) WriteVersion(ver Version, val string) (err error) {
 	if tmpGenName != "" {
 		oldGenPath := filepath.Join(st.path, tmpGenName)
 		newGenPath := filepath.Join(st.path,
-				fmt.Sprintf(genFormat, ver))
+			fmt.Sprintf(genFormat, ver))
 		err := os.Rename(oldGenPath, newGenPath)
-		if !IsExist(err) && !IsNotExist(err) {
+		if err != nil && !IsExist(err) && !IsNotExist(err) {
 			return err
 		}
+
+		st.genVer = ver
+		st.genPath = newGenPath
 	}
 
 	// Update our cached state
 	st.ver = ver
 	st.val = val
-	st.nxg = tmpGenName
 	return nil
 }
 
@@ -377,6 +405,8 @@ func writeVerFile(genPath, verName, val, nextGen string) error {
 // Attempts either to read or to write expired versions will fail.
 //
 func (st *State) Expire(before Version) (err error) {
+
+	panic("XXX")
 
 	// Find all existing generation directories up to version 'before'
 	maxver, maxname, names, err := scan(st.path, genFormat, before)
@@ -429,4 +459,3 @@ func IsNotExist(err error) bool {
 
 var ErrExist = os.ErrExist
 var ErrNotExist = os.ErrNotExist
-
