@@ -11,7 +11,7 @@ import (
 
 	"github.com/bford/cofo/cri"
 
-	//"github.com/dedis/tlc/go/model/qscod/fs/casfs"
+	"github.com/dedis/tlc/go/model/qscod/fs/store"
 )
 
 var verbose bool = false
@@ -90,13 +90,12 @@ func initCommand(args []string) {
 	}
 
 	_ = paths
-//	state := make([]casfs.State, len(paths))
-//	for i, path := range paths {
-//		state[i] = &casfs.State{}
-//		if err := state[i].Init(path, true, true); err != nil {
-//			log.Fatal(err)
-//		}
-//	}
+	store := make([]store.FileStore, len(paths))
+	for i, path := range paths {
+		if err := store[i].Init(path, true, true); err != nil {
+			log.Fatal(err)
+		}
+	}
 }
 
 const initUsageStr = `
@@ -141,7 +140,6 @@ func parseGroup(group string) ([]string, error) {
 		} else {
 			path, str = str, ""
 		}
-		println("member", path)
 		paths = append(paths, path)
 	}
 	if len(paths) < 3 {
