@@ -5,11 +5,8 @@
 package store
 
 import (
-	"log"
-	"math/rand"
-	"time"
-
 	. "github.com/dedis/tlc/go/model/qscod"
+	"github.com/dedis/tlc/go/model/qscod/fs/backoff"
 	"github.com/dedis/tlc/go/model/qscod/fs/util"
 	"github.com/dedis/tlc/go/model/qscod/fs/verst"
 )
@@ -18,16 +15,14 @@ import (
 // as a directory in a file system.
 //
 type FileStore struct {
-	state  verst.State
-	report func(err error)
+	state verst.State
+	bc    backoff.Config
 }
 
 // Initialize FileStore to use a directory at a given file system path.
 // If create is true, create the designated directory if it doesn't exist.
 // If excl is true, fail if the designated directory already exists.
 func (fs *FileStore) Init(path string, create, excl bool) error {
-	//fs.report = func(err error) { log.Println(err.Error()) }
-	fs.report = func(err error) { log.Fatal(err.Error()) }
 	return fs.state.Init(path, create, excl)
 }
 
@@ -43,7 +38,38 @@ func (fs *FileStore) Init(path string, create, excl bool) error {
 // if it determines an error to be permanent and fatal, however.
 //
 func (fs *FileStore) SetReport(report func(error)) {
-	fs.report = report
+	fs.bc.Report = report
+}
+
+// LastCommit finds and returns the last committed Head so far.
+func (fs *FileStore) LastCommit() (lastCommit Head) {
+
+	try := func() (err error) {
+		lastCommit, err = fs.tryLastCommit()
+		return err
+	}
+
+	fs.bc.Retry(try)
+	return lastCommit
+}
+
+func (fs *FileStore) tryLastCommit() (Head, error) {
+
+	// Read the latest state value from the file system
+	_, val, err := fs.state.ReadLatest()
+	if err != nil {
+		return Head{}, err
+	}
+
+	// Decode it into a Value
+	v, err := util.DecodeValue([]byte(val))
+	if err != nil {
+		return Head{}, err
+	}
+
+	// Return the last committed Head recorded in the latest Value
+	println("LastCommit returning", v.C.Step)
+	return v.C, nil
 }
 
 // Attempt to write the value v to a file associated with time-step step,
@@ -57,26 +83,13 @@ func (fs *FileStore) WriteRead(step Step, v Value) (rv Value, rh Head) {
 		return v, Head{}
 	}
 
-	var backoff time.Duration
-	for {
-		before := time.Now()
-		rv, rh, err := fs.tryWriteRead(step, v)
-		if err == nil {
-			return rv, rh // success
-		}
-		elapsed := time.Since(before)
-
-		// Report the error as appropriate
-		fs.report(err)
-
-		// Wait for an exponentially-growing random backoff period,
-		// with the duration of each operation attempt as the minimum
-		if backoff <= elapsed {
-			backoff = elapsed + 1
-		}
-		backoff += time.Duration(rand.Int63n(int64(backoff)))
-		time.Sleep(backoff)
+	try := func() (err error) {
+		rv, rh, err = fs.tryWriteRead(step, v)
+		return err
 	}
+
+	fs.bc.Retry(try)
+	return rv, rh
 }
 
 func (fs *FileStore) tryWriteRead(step Step, v Value) (Value, Head, error) {
@@ -116,19 +129,13 @@ func (fs *FileStore) tryWriteRead(step Step, v Value) (Value, Head, error) {
 
 		// The requested version has probably been aged out,
 		// so catch up to the most recent committed Head.
-		println("tryWriteRead: catching up from", step)
-		ver, val, err = fs.state.ReadLatest()
-		if err != nil {
-			return Value{}, Head{}, err
-		}
-
-		lv, err := util.DecodeValue([]byte(val))
+		lastCommit, err := fs.tryLastCommit()
 		if err != nil {
 			return Value{}, Head{}, err
 		}
 
 		// Return the passed v unmodified and the last committed Head
-		return v, lv.C, err
+		return v, lastCommit, err
 
 	default: // some other error
 		return Value{}, Head{}, err
