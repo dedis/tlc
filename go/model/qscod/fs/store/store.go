@@ -56,19 +56,19 @@ func (fs *FileStore) LastCommit() (lastCommit Head) {
 func (fs *FileStore) tryLastCommit() (Head, error) {
 
 	// Read the latest state value from the file system
-	_, val, err := fs.state.ReadLatest()
+	ver, val, err := fs.state.ReadLatest()
 	if err != nil {
 		return Head{}, err
 	}
 
 	// Decode it into a Value
 	v, err := util.DecodeValue([]byte(val))
-	if err != nil {
+	if err != nil && ver > 0 {
 		return Head{}, err
 	}
 
 	// Return the last committed Head recorded in the latest Value
-	println("LastCommit returning", v.C.Step)
+	//println("LastCommit returning", v.C.Step)
 	return v.C, nil
 }
 
