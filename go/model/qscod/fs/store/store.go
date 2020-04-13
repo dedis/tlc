@@ -102,9 +102,9 @@ func (fs *FileStore) tryWriteRead(step Step, v Value) (Value, Head, error) {
 	}
 
 	// Try to write it to the versioned store -
-	// but don't fret if someone else wrote it first.
+	// but don't fret if someone else wrote it or if it has expired.
 	err = fs.state.WriteVersion(ver, string(buf))
-	if err != nil && !verst.IsExist(err) {
+	if err != nil && !verst.IsExist(err) && !verst.IsNotExist(err) {
 		return Value{}, Head{}, err
 	}
 

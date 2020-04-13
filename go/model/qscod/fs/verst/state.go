@@ -168,7 +168,7 @@ func (st *State) refresh() error {
 }
 
 // Scan a directory for highest-numbered file or subdirectory matching format.
-// If upTo > 0, then returns the highest-numbered version no higher than upTo.
+// If upTo > 0, returns the highest-numbered version no higher than upTo.
 func scan(path, format string, upTo Version) (
 	maxver Version, maxname string, names []string, err error) {
 
