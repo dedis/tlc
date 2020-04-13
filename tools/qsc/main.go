@@ -32,47 +32,21 @@ func usage(usageString string) {
 	os.Exit(1)
 }
 
-type kind int
-
-const (
-	stringKind kind = iota
-	gitKind
-	hgKind
-)
-
 func main() {
 	if len(os.Args) < 3 {
 		usage(usageStr)
 	}
 
 	// Parse consensus group kind
-	var k kind
 	switch os.Args[1] {
 	case "string":
-		k = stringKind
-	case "git":
-		k = gitKind
-	case "hg":
-		k = hgKind
+		stringCommand(os.Args[2:])
+//	case "git":
+//		k = gitKind
+//	case "hg":
+//		k = hgKind
 	default:
 		usage(usageStr)
-	}
-	_ = k // XXX
-
-	nerr := 0
-	switch os.Args[2] {
-	case "init":
-		initCommand(os.Args[3:])
-	case "get":
-		getCommand(os.Args[3:])
-	case "set":
-		setCommand(os.Args[3:])
-	default:
-		usage(usageStr)
-	}
-
-	if nerr > 0 {
-		os.Exit(1)
 	}
 }
 

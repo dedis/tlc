@@ -6,9 +6,24 @@ import (
 	"fmt"
 )
 
-func initCommand(args []string) {
+
+func stringCommand(args []string) {
+	switch args[0] {
+	case "init":
+		stringInitCommand(args[1:])
+	case "get":
+		stringGetCommand(args[1:])
+	case "set":
+		stringSetCommand(args[1:])
+	default:
+		usage(usageStr)
+	}
+}
+
+
+func stringInitCommand(args []string) {
 	if len(args) < 1 {
-		usage(initUsageStr)
+		usage(stringInitUsageStr)
 	}
 
 	// Create the consensus group state on each member node
@@ -19,11 +34,10 @@ func initCommand(args []string) {
 	}
 }
 
-const initUsageStr = `
-Usage: qsc <kind> init <group>
+const stringInitUsageStr = `
+Usage: qsc string init <group>
 
-where <kind> is the consensus group kind
-and <group> specifies the consensus group
+where <group> specifies the consensus group
 as a composable resource identifier (CRI).
 For example:
 
@@ -31,9 +45,9 @@ For example:
 `
 
 
-func getCommand(args []string) {
+func stringGetCommand(args []string) {
 	if len(args) < 1 {
-		usage(getUsageStr)
+		usage(stringGetUsageStr)
 	}
 
 	// Open the file stores
@@ -48,16 +62,17 @@ func getCommand(args []string) {
 	fmt.Printf("commit %d state %q\n", h.Step, h.Data)
 }
 
-const getUsageStr = `
-Usage: qsc <kind> get <group>
+const stringGetUsageStr = `
+Usage: qsc string get <group>
 
-Returns...
+where <group> specifies the consensus group.
+Reads and prints the version number and string last committed.
 `
 
 
-func setCommand(args []string) {
+func stringSetCommand(args []string) {
 	if len(args) < 3 {
-		usage(setUsageStr)
+		usage(stringSetUsageStr)
 	}
 	old := args[1]
 	new := args[2]
@@ -89,9 +104,15 @@ func setCommand(args []string) {
 	os.Exit(0)
 }
 
-const setUsageStr = `
-Usage: qsc <kind> set <group> <old> <new>
+const stringSetUsageStr = `
+Usage: qsc string set <group> <old> <new>
 
-...
+where:
+<group> specifies the consensus group
+<old> is the expected existing value string
+<new> is the new value to set if it hasn't yet changed from <old>
+
+Prints the version number and string last committed,
+regardless of success or failure.
 `
 
