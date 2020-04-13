@@ -201,6 +201,7 @@ func (c *client) tlcr(node Node, step Step, v Value) (Value, Set) {
 	// Try to write potential value v, then read that of the client who won.
 	// If we found a committed history, either ourselves or virally,
 	// then just pretend to do writes until we can synchronize and finish.
+	// We also might need to skip over versions when writing to catch up.
 	if c.rcom.Step == 0 {
 		v, c.rcom = c.kv[node].WriteRead(step, v)
 	}

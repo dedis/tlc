@@ -314,15 +314,13 @@ func (st *State) readUncached(ver Version) (val string, err error) {
 }
 
 // Write version ver with associated value val if ver is not yet written.
+// The caller may skip version numbers, e.g., to catch up a delayed store,
+// but must never try to (re-)write older versions up to the last written.
+//
 func (st *State) WriteVersion(ver Version, val string) (err error) {
 
-	// The next version written should always be one higher than the last.
-	switch {
-	case ver <= st.ver:
+	if ver <= st.ver {
 		return ErrExist
-	case ver > st.ver+1:
-		println("WriteVersion", ver, "after", st.ver, "gen", st.genPath)
-		//return errors.New("versions must be written in-order")
 	}
 	verName := fmt.Sprintf(verFormat, ver)
 
