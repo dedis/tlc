@@ -174,7 +174,6 @@ func (c *Client) Run() error {
 func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 
 	c.mut.Lock() // Keep state locked while we're not waiting
-	defer c.mut.Unlock()
 
 	// Process work-items defined by the main thread in sequence,
 	// terminating only when the main thread records an error.
@@ -295,6 +294,8 @@ func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 		// Proceed to the next work item
 		ls, lv, lw = s, v, lw.next
 	}
+
+	c.mut.Unlock()
 }
 
 // tlcbRB calculates the receive (R) and broadcast (B) sets

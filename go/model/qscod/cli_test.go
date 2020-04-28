@@ -89,18 +89,19 @@ func testCli(t *testing.T, self, f, maxstep, maxpri int,
 
 //  Run a consensus test case with the specified parameters.
 func testRun(t *testing.T, nfail, nnode, ncli, maxstep, maxpri int) {
+
+	// Create a simple test key/value store representing each node
+	kv := make([]Store, nnode)
+	for i := range kv {
+		kv[i] = &testStore{}
+	}
+
+	// Create a reference total order for safety checking
+	to := &testOrder{}
+
 	desc := fmt.Sprintf("F=%v,N=%v,Clients=%v,Commits=%v,Tickets=%v",
-		nfail, nnode, ncli, maxstep, maxpri)
+		nfail, len(kv), ncli, maxstep, maxpri)
 	t.Run(desc, func(t *testing.T) {
-
-		// Create a test key/value store representing each node
-		kv := make([]Store, nnode)
-		for i := range kv {
-			kv[i] = &testStore{}
-		}
-
-		// Create a reference total order for safety checking
-		to := &testOrder{}
 
 		// Simulate the appropriate number of concurrent clients
 		wg := &sync.WaitGroup{}
@@ -112,6 +113,7 @@ func testRun(t *testing.T, nfail, nnode, ncli, maxstep, maxpri int) {
 	})
 }
 
+// Test the Client with a trivial in-memory key/value Store implementation.
 func TestClient(t *testing.T) {
 	testRun(t, 1, 3, 1, 100000, 100) // Standard f=1 case
 	testRun(t, 1, 3, 2, 100000, 100)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	. "github.com/dedis/tlc/go/model/qscod"
+	"github.com/dedis/tlc/go/model/qscod/fs/backoff"
 	"github.com/dedis/tlc/go/model/qscod/fs/util"
 )
 
@@ -30,35 +31,41 @@ type FileStore struct {
 // A more robust approach suited to asynchronous consensus would be
 // to log the error then retry in an exponential-backoff loop.
 //
-func (fs *FileStore) WriteRead(step Step, v Value) (rv Value, rh Head) {
+func (fs *FileStore) WriteRead(v Value) (rv Value) {
 
-	// Serialize the proposed value
-	buf, err := util.EncodeValue(v)
-	if err != nil {
-		panic(err.Error())
+	try := func() (err error) {
+
+		// Serialize the proposed value
+		buf, err := util.EncodeValue(v)
+		if err != nil {
+			return err
+		}
+
+		// Try to write the file, ignoring already-exists errors
+		name := fmt.Sprintf("ver-%d", v.P.Step)
+		path := filepath.Join(fs.Path, name)
+		err = util.WriteFileOnce(path, buf, 0666)
+		if err != nil && !os.IsExist(err) {
+			return err
+		}
+
+		// Read back whatever file was successfully written first there
+		rbuf, err := ioutil.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		// Deserialize the value read
+		rv, err = util.DecodeValue(rbuf)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	// Try to write the file, ignoring already-exists errors
-	name := fmt.Sprintf("ver-%d", step)
-	path := filepath.Join(fs.Path, name)
-	err = util.WriteFileOnce(path, buf, 0666)
-	if err != nil && !os.IsExist(err) {
-		panic(err.Error())
-	}
-
-	// Read back whatever file was successfully written first there
-	rbuf, err := ioutil.ReadFile(path)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	// Deserialize the value read
-	rv, err = util.DecodeValue(rbuf)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return rv, rh
+	backoff.Retry(try)
+	return rv
 }
 
 // QSCOD calls Committed to inform us that history comh is committed,

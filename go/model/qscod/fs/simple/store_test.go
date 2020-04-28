@@ -1,6 +1,7 @@
 package simple
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -9,6 +10,10 @@ import (
 
 	. "github.com/dedis/tlc/go/model/qscod"
 )
+
+// It sucks that Go doesn't allow packages to import public test code
+// from other packages - otherwise most of the code below needn't be duplicated
+// but could just be exported and reused from qscod/cli_test.go.
 
 // Object to record the common total order and verify it for consistency
 type testOrder struct {
@@ -37,60 +42,75 @@ func (to *testOrder) committed(t *testing.T, h Head) {
 }
 
 // testCli creates a test client with particular configuration parameters.
-func testCli(t *testing.T, self, nfail, ncom, maxpri int,
+func testCli(t *testing.T, self, f, maxstep, maxpri int,
 	kv []Store, to *testOrder, wg *sync.WaitGroup) {
 
+	// Use the simple Int63n for random number generation,
+	// with values constrained to be lower than maxpri for testing.
+	// A real deployment should use cryptographic randomness
+	// and should preferably be high-entropy, close to the full 64 bits.
 	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
 
-	// Commit ncom messages, and consistency-check each commitment.
-	h := Head{}
-	for i := 0; i < ncom; i++ {
+	// Our update function simply collects and consistency-checks
+	// committed Heads until a designated time-step is reached.
+	up := func(h Head) (prop string, err error) {
+		//fmt.Printf("cli %v saw commit %v %q\n", self, h.Step, h.Data)
 
-		// Start the test client with appropriate parameters assuming
-		// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
-		pref := fmt.Sprintf("cli %v commit %v", self, i)
-		h = Commit(2*nfail, nfail+1, kv, rv, pref, h)
-		//println("thread", self, "got commit", h.Step, h.Data)
+		// Consistency-check the history h known to be committed
+		to.committed(t, h)
 
-		to.committed(t, h) // consistency-check history h
+		// Stop once we reach the step limit
+		if h.Step >= Step(maxstep) {
+			return "", errors.New("Done")
+		}
+
+		prop = fmt.Sprintf("cli %v proposal %v", self, h.Step)
+		return prop, nil
 	}
+
+	// Start the test client with appropriate parameters assuming
+	// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
+	c := Client{KV: kv, Tr: 2 * f, Ts: f + 1, Up: up, RV: rv}
+	c.Run()
+
 	wg.Done()
 }
 
 //  Run a consensus test case with the specified parameters.
-func testRun(t *testing.T, nfail, nnode, ncli, ncommits, maxpri int) {
-	desc := fmt.Sprintf("F=%v,N=%v,Clients=%v,Commits=%v,Tickets=%v",
-		nfail, nnode, ncli, ncommits, maxpri)
-	t.Run(desc, func(t *testing.T) {
+func testRun(t *testing.T, nfail, nnode, ncli, maxstep, maxpri int) {
 
-		// Create a test key/value store representing each node
-		kv := make([]Store, nnode)
-		for i := range kv {
-			path := fmt.Sprintf("test-store-%d", i)
-			ss := &FileStore{path}
-			kv[i] = ss
+	// Create a test key/value store representing each node
+	kv := make([]Store, nnode)
+	for i := range kv {
+		path := fmt.Sprintf("test-store-%d", i)
+		ss := &FileStore{path}
+		kv[i] = ss
 
-			// Remove the test directory if one is left-over
-			// from a previous test run.
-			os.RemoveAll(path)
+		// Remove the test directory if one is left-over
+		// from a previous test run.
+		os.RemoveAll(path)
 
-			// Create the test directory afresh.
-			if err := os.Mkdir(path, 0744); err != nil {
-				t.Fatal(err)
-			}
-
-			// Clean it up once the test is done.
-			defer os.RemoveAll(path)
+		// Create the test directory afresh.
+		if err := os.Mkdir(path, 0744); err != nil {
+			t.Fatal(err)
 		}
 
-		// Create a reference total order for safety checking
-		to := &testOrder{}
+		// Clean it up once the test is done.
+		defer os.RemoveAll(path)
+	}
+
+	// Create a reference total order for safety checking
+	to := &testOrder{}
+
+	desc := fmt.Sprintf("F=%v,N=%v,Clients=%v,Commits=%v,Tickets=%v",
+		nfail, len(kv), ncli, maxstep, maxpri)
+	t.Run(desc, func(t *testing.T) {
 
 		// Simulate the appropriate number of concurrent clients
 		wg := &sync.WaitGroup{}
 		for i := 0; i < ncli; i++ {
 			wg.Add(1)
-			go testCli(t, i, nfail, ncommits, maxpri, kv, to, wg)
+			go testCli(t, i, nfail, maxstep, maxpri, kv, to, wg)
 		}
 		wg.Wait()
 	})
