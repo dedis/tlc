@@ -41,19 +41,69 @@ func (fs *FileStore) SetReport(report func(error)) {
 	fs.bc.Report = report
 }
 
-// LastCommit finds and returns the last committed Head so far.
-func (fs *FileStore) LastCommit() (lastCommit Head) {
+// Attempt to write the value v to a file associated with time-step step,
+// then read back whichever value was successfully written first.
+// Implements the qscod.Store interface.
+//
+func (fs *FileStore) WriteRead(v Value) (rv Value) {
+
+	// Don't try to write version 0; that's a virtual placeholder.
+	if v.P.Step == 0 {
+		return v
+	}
 
 	try := func() (err error) {
-		lastCommit, err = fs.tryLastCommit()
+		rv, err = fs.tryWriteRead(v)
 		return err
 	}
 
 	fs.bc.Retry(try)
-	return lastCommit
+	return rv
 }
 
-func (fs *FileStore) tryLastCommit() (Head, error) {
+func (fs *FileStore) tryWriteRead(val Value) (Value, error) {
+	ver := verst.Version(val.P.Step)
+
+	// Serialize the proposed value
+	valb, err := util.EncodeValue(val)
+	if err != nil {
+		return Value{}, err
+	}
+	vals := string(valb)
+
+	// Try to write it to the versioned store -
+	// but don't fret if someone else wrote it or if it has expired.
+	err = fs.state.WriteVersion(ver, vals)
+	if err != nil && !verst.IsExist(err) && !verst.IsNotExist(err) {
+		return Value{}, err
+	}
+
+	// Now read back whatever value was successfully written.
+	vals, err = fs.state.ReadVersion(ver)
+	if err != nil && verst.IsNotExist(err) {
+
+		// The requested version has probably been aged out,
+		// so catch up to the most recent committed Head.
+		_, vals, err = fs.state.ReadLatest()
+	}
+	if err != nil {
+		return Value{}, err
+	}
+
+	// Deserialize the value we read
+	val, err = util.DecodeValue([]byte(vals))
+	if err != nil {
+		return Value{}, err
+	}
+
+	// Expire all versions before this latest one
+	fs.state.Expire(verst.Version(val.P.Step))
+
+	// Return the value v that we read
+	return val, err
+}
+
+func (fs *FileStore) tryLatest() (Head, error) {
 
 	// Read the latest state value from the file system
 	ver, val, err := fs.state.ReadLatest()
@@ -70,74 +120,4 @@ func (fs *FileStore) tryLastCommit() (Head, error) {
 	// Return the last committed Head recorded in the latest Value
 	//println("LastCommit returning", v.C.Step)
 	return v.C, nil
-}
-
-// Attempt to write the value v to a file associated with time-step step,
-// then read back whichever value was successfully written first.
-// Implements the qscod.Store interface.
-//
-func (fs *FileStore) WriteRead(step Step, v Value) (rv Value, rh Head) {
-
-	// Don't try to write version 0; that's a virtual placeholder.
-	if step == 0 {
-		return v, Head{}
-	}
-
-	try := func() (err error) {
-		rv, rh, err = fs.tryWriteRead(step, v)
-		return err
-	}
-
-	fs.bc.Retry(try)
-	return rv, rh
-}
-
-func (fs *FileStore) tryWriteRead(step Step, v Value) (Value, Head, error) {
-	ver := verst.Version(step)
-
-	// Serialize the proposed value
-	buf, err := util.EncodeValue(v)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	// Try to write it to the versioned store -
-	// but don't fret if someone else wrote it or if it has expired.
-	err = fs.state.WriteVersion(ver, string(buf))
-	if err != nil && !verst.IsExist(err) && !verst.IsNotExist(err) {
-		return Value{}, Head{}, err
-	}
-
-	// Now read back whatever value was successfully written.
-	val, err := fs.state.ReadVersion(ver)
-	switch {
-	case err == nil: // success
-
-		// Deserialize the value we read
-		v, err = util.DecodeValue([]byte(val))
-		if err != nil {
-			return Value{}, Head{}, err
-		}
-
-		// Expire old versions before our last committed Head
-		fs.state.Expire(verst.Version(v.C.Step))
-
-		// Return the value v that we read
-		return v, Head{}, err
-
-	case verst.IsNotExist(err): // version doesn't exist
-
-		// The requested version has probably been aged out,
-		// so catch up to the most recent committed Head.
-		lastCommit, err := fs.tryLastCommit()
-		if err != nil {
-			return Value{}, Head{}, err
-		}
-
-		// Return the passed v unmodified and the last committed Head
-		return v, lastCommit, err
-
-	default: // some other error
-		return Value{}, Head{}, err
-	}
 }
