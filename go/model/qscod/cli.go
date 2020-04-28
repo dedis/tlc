@@ -33,9 +33,8 @@ type Head struct {
 // If the application encounters an error that warrants a true global failure,
 // then it should arrange for the Up function to return an error,
 // which will eventually cause all the worker threads to terminate.
-// In this case, the application should cancel the context passed to Run,
-// which will in turn cancel the contexts passed to active WriteRead calls,
-// which can simply return the value v that was requested to be written
+// In this case, the application can cancel any active WriteRead calls,
+// which may simply return the value v that was requested to be written
 // in order to allow the per-node worker thread to terminate cleanly.
 //
 type Store interface {
