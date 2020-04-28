@@ -1,6 +1,6 @@
-// This package provides low-level utility operations
-// needed by casfs.
-package util
+// This package supports writing files atomically
+// while ensuring "at-most-once" semantics.
+package atomic
 
 import (
 	"errors"
@@ -10,10 +10,6 @@ import (
 	"path/filepath"
 )
 
-// This code solves a different problem from, but is partly inspired by:
-// https://github.com/google/renameio
-// https://github.com/natefinch/atomic
-
 // WriteFileOnce attempts to write data to filename atomically, only once,
 // failing with ErrExist if someone else already wrote a file at filename.
 //
@@ -21,6 +17,10 @@ import (
 // at the target filename, by writing data to a temporary file first,
 // synchronizing it to stable storage, then atomically linking it into place.
 //
+// This code solves a different problem from, but is partly inspired by:
+// https://github.com/google/renameio
+// https://github.com/natefinch/atomic
+
 func WriteFileOnce(filename string, data []byte, perm os.FileMode) error {
 
 	// Create a temporary file in the target directory,

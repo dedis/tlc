@@ -1,6 +1,17 @@
-// Package qscod implements a simple model verison of the QSCOD algorithm
+// Package core implements the minimal core of the QSCOD consensus algorithm.
 // for client-driven "on-demand" consensus.
-package qscod
+//
+// This implementation of QSCOD builds on the TLCB and TLCR
+// threshold logical clock algorithms.
+// These algorithms are extremely simple but do impose one constraint:
+// the number of failing nodes must be at most one-third the group size.
+//
+// The unit tests for this package is in the test sub-package,
+// so that useful test framework code can be shared with other packages
+// without requiring any of it to be imported into development builds.
+// (Too bad Go doesn't allow packages to export and import test code.)
+//
+package core
 
 import "sync"
 

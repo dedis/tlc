@@ -55,7 +55,7 @@ import (
 	//	"errors"
 
 	"github.com/bford/cofo/cbe"
-	"github.com/dedis/tlc/go/model/qscod/fs/util"
+	"github.com/dedis/tlc/go/lib/fs/atomic"
 )
 
 //const versPerGen = 100 // Number of versions between generation subdirectories
@@ -395,7 +395,7 @@ func writeVerFile(genPath, verName, val, nextGen string) error {
 
 	// Write it atomically
 	verPath := filepath.Join(genPath, verName)
-	if err := util.WriteFileOnce(verPath, b, 0644); err != nil {
+	if err := atomic.WriteFileOnce(verPath, b, 0644); err != nil {
 		return err
 	}
 

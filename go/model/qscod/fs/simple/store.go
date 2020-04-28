@@ -11,9 +11,10 @@ import (
 	"os"
 	"path/filepath"
 
-	. "github.com/dedis/tlc/go/model/qscod"
+	. "github.com/dedis/tlc/go/model/qscod/core"
+	"github.com/dedis/tlc/go/model/qscod/encoding"
 	"github.com/dedis/tlc/go/model/qscod/fs/backoff"
-	"github.com/dedis/tlc/go/model/qscod/fs/util"
+	"github.com/dedis/tlc/go/lib/fs/atomic"
 )
 
 // FileStore implements a simple QSCOD key/value store
@@ -36,7 +37,7 @@ func (fs *FileStore) WriteRead(v Value) (rv Value) {
 	try := func() (err error) {
 
 		// Serialize the proposed value
-		buf, err := util.EncodeValue(v)
+		buf, err := encoding.EncodeValue(v)
 		if err != nil {
 			return err
 		}
@@ -44,7 +45,7 @@ func (fs *FileStore) WriteRead(v Value) (rv Value) {
 		// Try to write the file, ignoring already-exists errors
 		name := fmt.Sprintf("ver-%d", v.P.Step)
 		path := filepath.Join(fs.Path, name)
-		err = util.WriteFileOnce(path, buf, 0666)
+		err = atomic.WriteFileOnce(path, buf, 0666)
 		if err != nil && !os.IsExist(err) {
 			return err
 		}
@@ -56,7 +57,7 @@ func (fs *FileStore) WriteRead(v Value) (rv Value) {
 		}
 
 		// Deserialize the value read
-		rv, err = util.DecodeValue(rbuf)
+		rv, err = encoding.DecodeValue(rbuf)
 		if err != nil {
 			return err
 		}

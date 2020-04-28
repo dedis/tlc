@@ -5,10 +5,10 @@
 package store
 
 import (
-	. "github.com/dedis/tlc/go/model/qscod"
-	"github.com/dedis/tlc/go/model/qscod/fs/backoff"
-	"github.com/dedis/tlc/go/model/qscod/fs/util"
-	"github.com/dedis/tlc/go/model/qscod/fs/verst"
+	"github.com/dedis/tlc/go/lib/backoff"
+	"github.com/dedis/tlc/go/lib/fs/verst"
+	. "github.com/dedis/tlc/go/model/qscod/core"
+	"github.com/dedis/tlc/go/model/qscod/encoding"
 )
 
 // FileStore implements a QSCOD key/value store
@@ -65,7 +65,7 @@ func (fs *FileStore) tryWriteRead(val Value) (Value, error) {
 	ver := verst.Version(val.P.Step)
 
 	// Serialize the proposed value
-	valb, err := util.EncodeValue(val)
+	valb, err := encoding.EncodeValue(val)
 	if err != nil {
 		return Value{}, err
 	}
@@ -91,7 +91,7 @@ func (fs *FileStore) tryWriteRead(val Value) (Value, error) {
 	}
 
 	// Deserialize the value we read
-	val, err = util.DecodeValue([]byte(vals))
+	val, err = encoding.DecodeValue([]byte(vals))
 	if err != nil {
 		return Value{}, err
 	}
@@ -101,23 +101,4 @@ func (fs *FileStore) tryWriteRead(val Value) (Value, error) {
 
 	// Return the value v that we read
 	return val, err
-}
-
-func (fs *FileStore) tryLatest() (Head, error) {
-
-	// Read the latest state value from the file system
-	ver, val, err := fs.state.ReadLatest()
-	if err != nil {
-		return Head{}, err
-	}
-
-	// Decode it into a Value
-	v, err := util.DecodeValue([]byte(val))
-	if err != nil && ver > 0 {
-		return Head{}, err
-	}
-
-	// Return the last committed Head recorded in the latest Value
-	//println("LastCommit returning", v.C.Step)
-	return v.C, nil
 }
