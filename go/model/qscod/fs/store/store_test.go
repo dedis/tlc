@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -14,6 +15,7 @@ func testRun(t *testing.T, nfail, nnode, ncli, maxstep, maxpri int) {
 
 	// Create a test key/value store representing each node
 	kv := make([]Store, nnode)
+	ctx := context.Background()
 	for i := range kv {
 		path := fmt.Sprintf("test-store-%d", i)
 
@@ -23,7 +25,7 @@ func testRun(t *testing.T, nfail, nnode, ncli, maxstep, maxpri int) {
 
 		// Create the test directory afresh.
 		ss := &FileStore{}
-		if err := ss.Init(path, true, true); err != nil {
+		if err := ss.Init(ctx, path, true, true); err != nil {
 			t.Fatal(err)
 		}
 		kv[i] = ss

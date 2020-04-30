@@ -5,6 +5,8 @@
 package store
 
 import (
+	"context"
+
 	"github.com/dedis/tlc/go/lib/backoff"
 	"github.com/dedis/tlc/go/lib/fs/verst"
 	. "github.com/dedis/tlc/go/model/qscod/core"
@@ -16,29 +18,29 @@ import (
 //
 type FileStore struct {
 	state verst.State
+	ctx   context.Context
 	bc    backoff.Config
 }
 
 // Initialize FileStore to use a directory at a given file system path.
 // If create is true, create the designated directory if it doesn't exist.
 // If excl is true, fail if the designated directory already exists.
-func (fs *FileStore) Init(path string, create, excl bool) error {
+func (fs *FileStore) Init(ctx context.Context, path string, create, excl bool) error {
+
+	fs.ctx = ctx
 	return fs.state.Init(path, create, excl)
 }
 
-// SetReport sets the function used to report errors that occur
+// SetBackoff sets the backoff configuration for handling errors that occur
 // while attempting to access the key/value store on the file system.
-// The default report function writes the error via the standard log.
 //
 // Since we don't know in general which errors may be transitory
 // and which are permanent failures, especially on remote file systems,
 // FileStore assumes all errors may be transitory, just reports them,
 // and keeps trying the access after a random exponential backoff.
-// A custom report function can panic or terminate the process
-// if it determines an error to be permanent and fatal, however.
 //
-func (fs *FileStore) SetReport(report func(error)) {
-	fs.bc.Report = report
+func (fs *FileStore) SetReport(bc backoff.Config) {
+	fs.bc = bc
 }
 
 // Attempt to write the value v to a file associated with time-step step,
@@ -57,12 +59,12 @@ func (fs *FileStore) WriteRead(v Value) (rv Value) {
 		return err
 	}
 
-	fs.bc.Retry(try)
+	fs.bc.Retry(fs.ctx, try)
 	return rv
 }
 
 func (fs *FileStore) tryWriteRead(val Value) (Value, error) {
-	ver := verst.Version(val.P.Step)
+	ver := int64(val.P.Step)
 
 	// Serialize the proposed value
 	valb, err := encoding.EncodeValue(val)
@@ -97,7 +99,7 @@ func (fs *FileStore) tryWriteRead(val Value) (Value, error) {
 	}
 
 	// Expire all versions before this latest one
-	fs.state.Expire(verst.Version(val.P.Step))
+	fs.state.Expire(int64(val.P.Step))
 
 	// Return the value v that we read
 	return val, err

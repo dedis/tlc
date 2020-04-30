@@ -6,15 +6,16 @@
 package simple
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 
+	"github.com/dedis/tlc/go/lib/backoff"
+	"github.com/dedis/tlc/go/lib/fs/atomic"
 	. "github.com/dedis/tlc/go/model/qscod/core"
 	"github.com/dedis/tlc/go/model/qscod/encoding"
-	"github.com/dedis/tlc/go/model/qscod/fs/backoff"
-	"github.com/dedis/tlc/go/lib/fs/atomic"
 )
 
 // FileStore implements a simple QSCOD key/value store
@@ -65,7 +66,7 @@ func (fs *FileStore) WriteRead(v Value) (rv Value) {
 		return nil
 	}
 
-	backoff.Retry(try)
+	backoff.Retry(context.Background(), try)
 	return rv
 }
 
