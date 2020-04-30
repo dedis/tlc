@@ -64,17 +64,14 @@ const versPerGen = 10 // Number of versions between generation subdirectories
 const genFormat = "gen-%d" // Format for generation directory names
 const verFormat = "ver-%d" // Format for register version file names
 
-// A register version number is just a 64-bit integer.
-type Version int64
-
 // State holds cached state for a single verst versioned register.
 type State struct {
 	path    string  // Base pathname of directory containing register state
-	genVer  Version // Version number of highest generation subdirectory
+	genVer  int64 // Version number of highest generation subdirectory
 	genPath string  // Pathname to generation subdirectory
-	ver     Version // Highest register version known to exist already
+	ver     int64 // Highest register version known to exist already
 	val     string  // Cached register value for highest known version
-	expVer  Version // Version number before which state is expired
+	expVer  int64 // Version number before which state is expired
 }
 
 // Initialize State to refer to a verst register at a given file system path.
@@ -169,8 +166,8 @@ func (st *State) refresh() error {
 
 // Scan a directory for highest-numbered file or subdirectory matching format.
 // If upTo > 0, returns the highest-numbered version no higher than upTo.
-func scan(path, format string, upTo Version) (
-	maxver Version, maxname string, names []string, err error) {
+func scan(path, format string, upTo int64) (
+	maxver int64, maxname string, names []string, err error) {
 
 	// Scan the verst directory for the highest-numbered subdirectory.
 	dir, err := os.Open(path)
@@ -189,7 +186,7 @@ func scan(path, format string, upTo Version) (
 
 		// Scan the version number embedded in the name, if any,
 		// and confirm that the filename exactly matches the format.
-		var ver Version
+		var ver int64
 		n, err := fmt.Sscanf(name, format, &ver)
 		if n < 1 || err != nil || name != fmt.Sprintf(format, ver) {
 			continue
@@ -239,7 +236,7 @@ func readVerFile(genPath, verName string) (val, nextGen string, err error) {
 // returning both the highest version number (key) and associated value.
 // Of course a new version might be written at any time,
 // so the caller must assume this information could become stale immediately.
-func (st *State) ReadLatest() (ver Version, val string, err error) {
+func (st *State) ReadLatest() (ver int64, val string, err error) {
 
 	if err := st.refresh(); err != nil {
 		return 0, "", err
@@ -251,7 +248,7 @@ func (st *State) ReadLatest() (ver Version, val string, err error) {
 // returning the associated value if possible.
 // Returns ErrNotExist if the specified version does not exist,
 // either because it has never been written or because it has been expired.
-func (st *State) ReadVersion(ver Version) (val string, err error) {
+func (st *State) ReadVersion(ver int64) (val string, err error) {
 
 	// In the common case of reading back the last-written version,
 	// just return its value from our cache.
@@ -274,7 +271,7 @@ func (st *State) ReadVersion(ver Version) (val string, err error) {
 	return val, nil
 }
 
-func (st *State) readUncached(ver Version) (val string, err error) {
+func (st *State) readUncached(ver int64) (val string, err error) {
 
 	// Optimize for sequential reads of the "next" version
 	verName := fmt.Sprintf(verFormat, ver)
@@ -317,7 +314,7 @@ func (st *State) readUncached(ver Version) (val string, err error) {
 // The caller may skip version numbers, e.g., to catch up a delayed store,
 // but must never try to (re-)write older versions up to the last written.
 //
-func (st *State) WriteVersion(ver Version, val string) (err error) {
+func (st *State) WriteVersion(ver int64, val string) (err error) {
 
 	if ver <= st.ver {
 		return ErrExist
@@ -406,7 +403,7 @@ func writeVerFile(genPath, verName, val, nextGen string) error {
 // It does not necessarily delete these older versions immediately, however.
 // Attempts either to read or to write expired versions will fail.
 //
-func (st *State) Expire(before Version) {
+func (st *State) Expire(before int64) {
 	if st.expVer < before {
 		st.expVer = before
 	}

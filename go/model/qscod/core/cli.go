@@ -14,6 +14,7 @@
 package core
 
 import "sync"
+import "context"
 
 type Node int   // Node represents a node number from 0 through n-1
 type Step int64 // Step represents a TLC time-step counting from 0
@@ -54,9 +55,9 @@ type Store interface {
 
 // Value represents the values that a consensus node's key/value Store maps to.
 type Value struct {
-	I    int64 // Random integer genetic fitness priority for this proposal
-	C, P Head  // Last-committed and newly-proposed history views
-	R, B Set   // Read set and broadcast set from TLCB
+	I       int64 // Random integer priority for this proposal
+	L, C, P Head  // Last and current commit, and proposed history views
+	R, B    Set   // Read set and broadcast set from TLCB
 }
 
 // Set represents a set of proposed values from the same time-step.
@@ -101,8 +102,8 @@ func (S Set) best() (bn Node, bv Value, bu bool) {
 // Up is a callback function that the Client calls regularly while running,
 // to update the caller's knowledge of committed transactions
 // and to update the proposal data the client attempts to commit.
-// Client passes to Up the Step number and proposal Data string
-// for some recent proposal that is known to have been committed.
+// Client passes to Up the Step numbers and proposal Data strings
+// for the last (predecessor) and current states known to be committed.
 // This known-committed proposal will change regularly across calls,
 // but may not change on each call and may not even be monotonic.
 // The Up function returns a string representing the new preferred
@@ -118,13 +119,12 @@ func (S Set) best() (bn Node, bv Value, bu bool) {
 // for maximum protection against denial-of-service attacks in the network.
 //
 type Client struct {
-	KV     []Store                    // Node state key/value stores
-	Tr, Ts int                        // TLCB receive and spread thresholds
-	Up     func(Head) (string, error) // Proposal update function
-	RV     func() int64               // Random priority generator
+	KV     []Store                // Node state key/value stores
+	Tr, Ts int                    // Receive and spread thresholds
+	Pr     func(L, C Head) string // Proposal formulation function
+	RV     func() int64           // Random priority generator
 
-	mut  sync.Mutex // Mutex protecting this client's state
-	prop string     // Preferred proposal defined by caller
+	mut sync.Mutex // Mutex protecting this client's state
 }
 
 type work struct {
@@ -132,34 +132,31 @@ type work struct {
 	cond *sync.Cond // For awaiting threshold conditions
 	max  Value      // Value with highest time-step we must catch up to
 	next *work      // Forward pointer to next work item
-	err  error      // Non-nil indicates last work item
 }
 
 // Run starts a client running with its given configuration parameters,
 // proposing transactions and driving the consensus state machine continuously
-// until the caller requests that it shut down.
-// then requests the client to propose transactions containing
-// application-defined message msg until some message commits.
-// Returns the history that successfully committed msg.
-func (c *Client) Run() error {
+// forever or until the passed context is cancelled.
+//
+func (c *Client) Run(ctx context.Context) (err error) {
 
 	// Keep the mutex locked whenever we're not waiting.
 	c.mut.Lock()
 	defer c.mut.Unlock()
 
 	// Launch one client thread to drive each of the n consensus nodes.
-	lv, lw := Value{}, &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
+	lw := &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
 	for i := range c.KV {
-		go c.thread(Node(i), 0, lv, lw)
+		go c.thread(ctx, Node(i), 0, Value{}, lw)
 	}
 
-	// Keep driving the consensus state forward until an error occurs.
-	for lw.err == nil {
+	// Drive consensus state forever or until our context gets cancelled.
+	for ctx.Err() == nil {
 
-		// Create the next work item
+		// Set the next work-item in the current last work-item.
 		lw.next = &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
 
-		// Wake up any threads waiting for it to appear
+		// Wake up any threads waiting for a next item to appear
 		lw.cond.Broadcast()
 
 		// Wait for a threshold number of worker threads
@@ -168,27 +165,28 @@ func (c *Client) Run() error {
 			lw.cond.Wait()
 		}
 
-		// Update our current preferred proposal and error status
-		c.prop, lw.next.err = c.Up(lw.max.C)
-
 		// Move on to process the next work item
 		lw = lw.next
 	}
 
+	// Signal the worker threads to terminate with an all-nil work-item
+	lw.next = &work{}
+	lw.cond.Broadcast()
+
 	// Any slow client threads will continue in the background
 	// until they catch up with the others or successfully get cancelled.
-	return lw.err
+	return ctx.Err()
 }
 
 // thread represents the main loop of a client's thread
 // that represents and drives a particular consensus group node.
-func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
+func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *work) {
 
 	c.mut.Lock() // Keep state locked while we're not waiting
 
 	// Process work-items defined by the main thread in sequence,
-	// terminating only when the main thread records an error.
-	for lw.err == nil {
+	// terminating when we encounter a work-item with a nil kvc.
+	for ; lw.kvc != nil; lw = lw.next {
 
 		// Collect a threshold number of last-step values in lw.kvc,
 		// after which work-item lw will be considered complete.
@@ -205,10 +203,6 @@ func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 			if lv.P.Step > lw.max.P.Step {
 				lw.max = lv
 			}
-
-			if lv.P.Step < ls || lv.P.Step > lw.max.P.Step {
-				panic("XXX")
-			}
 		}
 
 		// Wait until the main thread has created a next work item,
@@ -223,8 +217,17 @@ func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 		// Decide on the next step number and value to broadcast,
 		// based on the threshold set we collected,
 		// which is now immutable and consistent across threads.
-		s, v := ls+1, Value{C: lv.C, P: Head{Step: ls + 1}}
+		s, v := ls+1, Value{L: lv.L, C: lv.C, P: Head{Step: ls + 1}}
 		switch {
+		case ctx.Err() != nil:
+
+			// The client Run's context has been cancelled.
+			// The worker threads should now do nothing
+			// except catch up to the final work-item,
+			// releasing other threads waiting on the kvc threshold
+			// along the way until all catch up and can terminate.
+			continue
+
 		case lw.max.P.Step > ls:
 
 			// The last work-item failed to reach the threshold
@@ -268,9 +271,12 @@ func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 
 			// We always adopt some best confirmed proposal from R2
 			// as our own (still tentative so far) view of history.
+			// If this round successfully commits,
+			// then our b2 will be the same as everyone else's,
+			// even if we fail below to realize that fact.
 			_, b2, _ := R2.best()
 
-			// Find the best proposal b0 in some node's R0 set.
+			// Find the best-known proposal b0 in some node's R0.
 			// We can get an R0 set from the first round in b2.R.
 			// Also determine if b0 was uniquely best in this R0.
 			// Our R2 and B2 sets will be subsets of any valid R0.
@@ -282,13 +288,18 @@ func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 			// If b is uniquely-best in R0 we can compare priorities
 			// to see if two values are the same node's proposal.
 			if u0 && b0.I == b2.I && b0.I == B2[n0].I {
-				v.C = b0.P // original proposal including data
+
+				// b0.P is the original proposal with data,
+				// which becomes the new current commit C.
+				// The previous current commit
+				// becomes the last commit L.
+				v.L, v.C = v.C, b0.P
 			}
 
 			// Set the value for the first TLCB call
 			// in the next QSCOD round to broadcast,
 			// containing a proposal for the next round.
-			v.P.Data, v.I = c.prop, c.RV()
+			v.P.Data, v.I = c.Pr(v.L, v.C), c.RV()
 		}
 
 		// Try to write new value, then read whatever the winner wrote.
@@ -303,7 +314,7 @@ func (c *Client) thread(node Node, ls Step, lv Value, lw *work) {
 		// We'll deal with that above in the next iteration.
 
 		// Proceed to the next work item
-		ls, lv, lw = s, v, lw.next
+		ls, lv = s, v
 	}
 
 	c.mut.Unlock()
