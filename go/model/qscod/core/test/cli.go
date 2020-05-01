@@ -44,15 +44,9 @@ func testCli(t *testing.T, self, f, maxstep, maxpri int,
 	// Create a cancelable context for the test run
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Use the simple Int63n for random number generation,
-	// with values constrained to be lower than maxpri for testing.
-	// A real deployment should use cryptographic randomness
-	// and should preferably be high-entropy, close to the full 64 bits.
-	rv := func() int64 { return rand.Int63n(int64(maxpri)) }
-
 	// Our proposal function simply collects and consistency-checks
 	// committed Heads until a designated time-step is reached.
-	pr := func(L, C Head) string {
+	pr := func(i Node, L, C Head) (string, int64) {
 		//fmt.Printf("cli %v saw commit %v %q\n", self, C.Step, C.Data)
 
 		// Consistency-check the history h known to be committed
@@ -63,12 +57,19 @@ func testCli(t *testing.T, self, f, maxstep, maxpri int,
 			cancel()
 		}
 
-		return fmt.Sprintf("cli %v proposal %v", self, C.Step)
+		// Use the simple Int63n for random number generation,
+		// with values constrained to be lower than maxpri for testing.
+		// A real deployment should use cryptographic randomness
+		// and should preferably be high-entropy,
+		// close to the full 64 bits.
+		pri := rand.Int63n(int64(maxpri))
+
+		return fmt.Sprintf("cli %v proposal %v", self, C.Step), pri
 	}
 
 	// Start the test client with appropriate parameters assuming
 	// n=3f, tr=2f, tb=f, and ts=f+1, satisfying TLCB's constraints.
-	c := Client{KV: kv, Tr: 2 * f, Ts: f + 1, Pr: pr, RV: rv}
+	c := Client{KV: kv, Tr: 2 * f, Ts: f + 1, Pr: pr}
 	c.Run(ctx)
 
 	wg.Done()

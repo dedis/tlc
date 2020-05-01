@@ -13,6 +13,7 @@
 //
 package core
 
+import "fmt"
 import "sync"
 import "context"
 
@@ -121,8 +122,8 @@ func (S Set) best() (bn Node, bv Value, bu bool) {
 type Client struct {
 	KV     []Store                // Node state key/value stores
 	Tr, Ts int                    // Receive and spread thresholds
-	Pr     func(L, C Head) string // Proposal formulation function
-	RV     func() int64           // Random priority generator
+	Pr     func(i Node, L, C Head) (string, int64) // Proposal function
+//	RV	func() int64	// Random priority generator
 
 	mut sync.Mutex // Mutex protecting this client's state
 }
@@ -188,6 +189,10 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 	// terminating when we encounter a work-item with a nil kvc.
 	for ; lw.kvc != nil; lw = lw.next {
 
+		if lv.P.Step < ls {
+			println("lv at", lv.P.Step, "should be", ls)
+		}
+
 		// Collect a threshold number of last-step values in lw.kvc,
 		// after which work-item lw will be considered complete.
 		// Don't modify kvc or max after reaching the threshold tr,
@@ -214,6 +219,13 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 		// Wake up everyone else once we reach the receive threshold
 		lw.cond.Broadcast()
 
+		str := fmt.Sprintf("%v kvc at %v contains:\n", node, ls)
+		for i, v := range lw.kvc {
+			str += fmt.Sprintf("%v step %v data %q pri %v C step %v data %q \n",
+				i, v.P.Step, v.P.Data, v.I, v.C.Step, v.C.Data)
+		}
+		println(str)
+
 		// Decide on the next step number and value to broadcast,
 		// based on the threshold set we collected,
 		// which is now immutable and consistent across threads.
@@ -226,6 +238,7 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 			// except catch up to the final work-item,
 			// releasing other threads waiting on the kvc threshold
 			// along the way until all catch up and can terminate.
+			println("context cancelled")
 			continue
 
 		case lw.max.P.Step > ls:
@@ -234,6 +247,7 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 			// because some node had already reached a higher step.
 			// Our next work item is simply to catch up all nodes
 			// at least to the highest-known step we discovered.
+			println(node, "catching up from", ls, "to", lw.max.P.Step)
 			s, v = lw.max.P.Step, lw.max
 
 		case (ls & 1) == 0: // completing an even-numbered step
@@ -287,19 +301,32 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 			// This test may succeed only for some nodes in a round.
 			// If b is uniquely-best in R0 we can compare priorities
 			// to see if two values are the same node's proposal.
-			if u0 && b0.I == b2.I && b0.I == B2[n0].I {
+//			// Never commit proposals that don't change the Data,
+//			// since we use those to represent "no-op" proposals.
+			if u0 && b0.I == b2.I && b0.I == B2[n0].I { //&&
+//				b0.P.Data != v.C.Data {
 
 				// b0.P is the original proposal with data,
 				// which becomes the new current commit C.
 				// The previous current commit
 				// becomes the last commit L.
+				println(node, "committed", b0.P.Step,
+					"on", v.C.Step, "data", b0.P.Data)
 				v.L, v.C = v.C, b0.P
 			}
 
 			// Set the value for the first TLCB call
 			// in the next QSCOD round to broadcast,
 			// containing a proposal for the next round.
-			v.P.Data, v.I = c.Pr(v.L, v.C), c.RV()
+			v.P.Data, v.I = c.Pr(node, v.L, v.C)
+		}
+
+		if v.P.Step <= ls || v.P.Step < lw.max.P.Step {
+			println("no progress: ls", ls, "lv", lw.max.P.Step,
+				"to", v.P.Step)
+		}
+		if v.P.Step != s {
+			println("value has wrong step!?", v.P.Step, s)
 		}
 
 		// Try to write new value, then read whatever the winner wrote.
@@ -309,9 +336,15 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 		v = c.KV[node].WriteRead(v)
 		c.mut.Lock()
 
+		if v.P.Step < s {
+			println("read back value from wrong step", v.P.Step, s)
+		}
+
 		// Note that the newly-returned value v
 		// may be from a higher time-step than expected (s).
 		// We'll deal with that above in the next iteration.
+		// The returned value v can also be Value{}
+		// but only after our context ctx has been cancelled.
 
 		// Proceed to the next work item
 		ls, lv = s, v

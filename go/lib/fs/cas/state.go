@@ -17,15 +17,15 @@ import (
 	"github.com/dedis/tlc/go/lib/fs/verst"
 )
 
-// State holds cached state for a single compare-and-set register.
-type State struct {
+// FileStore holds cached state for a single compare-and-set register.
+type FileStore struct {
 	vs verst.State // underlying versioned state
 }
 
-// Initialize State to refer to a CAS register at a given file system path.
+// Initialize FileStore to refer to a CAS register at a given file system path.
 // If create is true, create the designated directory if it doesn't exist.
 // If excl is true, fail if the designated directory already exists.
-func (st *State) Init(path string, create, excl bool) error {
+func (st *FileStore) Init(path string, create, excl bool) error {
 	return st.vs.Init(path, create, excl)
 }
 
@@ -38,7 +38,7 @@ func (st *State) Init(path string, create, excl bool) error {
 // CheckAndSet returns a non-nil error only if an unexpected error occurred,
 // other than a simple race between multiple writers.
 //
-func (st *State) CheckAndSet(ctx context.Context, ver int64, val string) (
+func (st *FileStore) CheckAndSet(ctx context.Context, ver int64, val string) (
 	actualVer int64, actualVal string, err error) {
 
 	// Try to write the new version to the underlying versioned store -

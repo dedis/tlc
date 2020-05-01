@@ -38,7 +38,7 @@ func (to *History) Observe(t *testing.T, ver int64, val string) {
 	case to.vs[ver] == "":
 		to.vs[ver] = val
 	case to.vs[ver] != val:
-		t.Errorf("History inconsistency at %v:\nold: %+v\nnew: %+v",
+		t.Errorf("\nHistory inconsistency at %v:\nold: %+v\nnew: %+v",
 			ver, to.vs[ver], val)
 	}
 }
@@ -95,8 +95,10 @@ func Stores(t *testing.T, nthreads, naccesses int, store ...cas.Store) {
 		for k := 0; k < naccesses; k++ {
 			reqVal := fmt.Sprintf("store %v thread %v access %v",
 				i, j, k)
+			//println("tester", i, j, "access", k)
 			lastVer, _, _ = cs.CheckAndSet(bg, lastVer, reqVal)
 		}
+		//println("tester", i, j, "done")
 		wg.Done()
 	}
 
@@ -111,4 +113,5 @@ func Stores(t *testing.T, nthreads, naccesses int, store ...cas.Store) {
 	}
 
 	// Wait for all tester goroutines to complete
+	wg.Wait()
 }
