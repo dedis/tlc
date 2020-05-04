@@ -1,4 +1,4 @@
-package cas
+package qscas
 
 import (
 	"context"
@@ -30,6 +30,7 @@ type Group struct {
 // the maximum number of faulty nodes the group should tolerate.
 // For this implementation of QSCOD based on the TLCB and TLCR algorithms,
 // faulty should be at most one-third of the total group size.
+// If faulty < 0, it is set to one-third of the group size, rounded down.
 //
 // Start launchers worker goroutines that help service CAS requests,
 // which will run and consume resources forever unless cancelled.
@@ -42,6 +43,9 @@ func (g *Group) Start(ctx context.Context, members []cas.Store, faulty int) *Gro
 	// For details on where these calculations come from, see:
 	// https://arxiv.org/abs/2003.02291
 	N := len(members)
+	if faulty < 0 {
+		faulty = N / 3		// Default fault tolerance threshold
+	}
 	Tr := N - faulty // receive threshold
 	Ts := N - Tr + 1 // spread threshold
 	if Tr <= 0 || Tr > N || Ts <= 0 || Ts > Tr || (Ts+Tr) <= N {
@@ -78,7 +82,7 @@ func (g *Group) Start(ctx context.Context, members []cas.Store, faulty int) *Gro
 				}
 				//println("got work function\n")
 				prop, pri = f(s, p, c) // call work function
-				if prop != "" {
+				if prop != "" || pri != 0 {
 					return prop, pri // return its result
 				}
 				//println("work function yielded no work")
@@ -161,13 +165,13 @@ func (g *Group) CompareAndSet(ctx context.Context, old, new string) (
 		mut.Lock()
 		defer mut.Unlock()
 
-		//		println("CAS prop lastVer", lastVer, "reqVal", reqVal, "C.Step", C.Step, "C.Data", C.Data)
+		//println("CAS step", s, cur, com, "prop", old, "->", new)
 
 		// Now check the situation of what's known to be committed.
 		switch {
 
 		// It's safe to propose new as the new string to commit
-		// only if the prior value we're building on is equal to old.
+		// if the prior value we're building on is equal to old.
 		case cur == old:
 			prop, pri = new, randValue()
 
@@ -180,6 +184,7 @@ func (g *Group) CompareAndSet(ctx context.Context, old, new string) (
 		// but also isn't committed, we have to make no-op proposals
 		// until we manage to get something committed.
 		default:
+			println("no-op proposal")
 			prop, pri = cur, randValue()
 
 			//case int64(s) > lastVer && c && p != prop:
@@ -244,7 +249,7 @@ func (g *Group) CompareAndSet(ctx context.Context, old, new string) (
 	// Since the channel is unbuffered, each send will block
 	// until some consensus worker thread is ready to receive it.
 	for !done() && ctx.Err() == nil && g.ctx.Err() == nil {
-		//println("CAS sending lastVer", lastVer, "reqVal", reqVal)
+		//println("CAS sending", old, "->", new)
 		g.ch <- pr
 	}
 	//	println("CAS done", lastVer, "reqVal", reqVal,

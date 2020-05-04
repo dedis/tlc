@@ -1,4 +1,4 @@
-package cas
+package qscas
 
 import (
 	"github.com/dedis/tlc/go/lib/backoff"
