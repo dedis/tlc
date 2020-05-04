@@ -17,15 +17,6 @@ package core
 import "sync"
 import "context"
 
-type Node int   // Node represents a node number from 0 through n-1
-type Step int64 // Step represents a TLC time-step counting from 0
-
-// Head represents a view of history proposed by some node in a QSC round.
-//type Head struct {
-//	Step Step   // TLC time-step of last successful commit in this view
-//	Data string // Application data committed at that step in this view
-//}
-
 // Store represents an interface to one of the n key/value stores
 // representing the persistent state of each of the n consensus group members.
 // A Store's keys are integer TLC time-steps,
@@ -56,21 +47,20 @@ type Store interface {
 
 // Value represents the values that a consensus node's key/value Store maps to.
 type Value struct {
-	S Step
-	P string
-	I int64 // Random integer priority for this proposal
-	//	L, C, P Head  // Last and current commit, and proposed history views
-	//	P Head  // Proposed view of history
-	R, B Set // Read set and broadcast set from TLCB
+	S    int64   // TLC step number this broadcast value is for
+	P    string // Application data string for this proposal
+	I    int64  // Random integer priority for this proposal
+	R, B Set    // Read set and broadcast set from TLCB
 }
 
-// Set represents a set of proposed values from the same time-step.
-type Set map[Node]Value
+// Set represents a set of proposed values from the same time-step,
+// indexed by integer node numbers.
+type Set map[int]Value
 
 // best returns some maximum-priority Value in a Set,
 // together with a flag indicating whether the returned history
 // is uniquely the best, i.e., the set contains no history tied for best.
-func (S Set) best() (bn Node, bv Value, bu bool) {
+func (S Set) best() (bn int, bv Value, bu bool) {
 	for n, v := range S {
 		if v.I >= bv.I {
 			// A new best value is unique (so far)
@@ -110,7 +100,7 @@ func (S Set) best() (bn Node, bv Value, bu bool) {
 // Up is a callback function that the Client calls regularly while running,
 // to update the caller's knowledge of committed transactions
 // and to update the proposal data the client attempts to commit.
-// Client passes to Up the Step numbers and proposal Data strings
+// Client passes to Up the step numbers and proposal Data strings
 // for the last (predecessor) and current states known to be committed.
 // This known-committed proposal will change regularly across calls,
 // but may not change on each call and may not even be monotonic.
@@ -129,8 +119,7 @@ func (S Set) best() (bn Node, bv Value, bu bool) {
 type Client struct {
 	KV     []Store                                  // Node state key/value stores
 	Tr, Ts int                                      // Receive and spread thresholds
-	Pr     func(Step, string, bool) (string, int64) // Proposal function
-	//	RV	func() int64	// Random priority generator
+	Pr     func(int64, string, bool) (string, int64) // Proposal function
 
 	mut sync.Mutex // Mutex protecting this client's state
 }
@@ -156,7 +145,7 @@ func (c *Client) Run(ctx context.Context) (err error) {
 	// Launch one client thread to drive each of the n consensus nodes.
 	w := &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
 	for i := range c.KV {
-		go c.worker(Node(i), w)
+		go c.worker(i, w)
 	}
 
 	// Drive consensus state forever or until our context gets cancelled.
@@ -275,10 +264,10 @@ func (c *Client) Run(ctx context.Context) (err error) {
 		//fmt.Printf("at %v next step %v pri %v prop %q R %v B %v\n",
 		//	w.val.S, nv.S, nv.I, nv.P, len(nv.R), len(nv.B))
 
-		if nv.S < w.max.S {
-			println("no progress: s", w.val.S, "lv", w.max.S,
-				"to", nv.S)
-		}
+		//if nv.S < w.max.S {
+		//	println("no progress: s", w.val.S, "lv", w.max.S,
+		//		"to", nv.S)
+		//}
 	}
 
 	// Signal the worker threads to terminate with an all-nil work-item
@@ -302,7 +291,7 @@ func (c *Client) Run(ctx context.Context) (err error) {
 // So we have only one worker per consensus group node do everything serially,
 // limiting resource usage while protecting the main thread from slow nodes.
 //
-func (c *Client) worker(node Node, w *work) {
+func (c *Client) worker(node int, w *work) {
 
 	// Keep Client state locked while we're not waiting
 	c.mut.Lock()

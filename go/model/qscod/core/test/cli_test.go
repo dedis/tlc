@@ -19,7 +19,7 @@ func (ts *testStore) WriteRead(v Value) Value {
 	defer ts.mut.Unlock()
 
 	// Write value v only if it's newer than the last value written.
-	if v.P.Step > ts.v.P.Step {
+	if v.S > ts.v.S {
 		ts.v = v
 	}
 
@@ -48,12 +48,12 @@ func TestClient(t *testing.T) {
 	testRun(t, 1, 3, 50, 100000, 100)
 	testRun(t, 1, 3, 100, 100000, 100)
 
-	testRun(t, 2, 6, 10, 10000, 100)  // Standard f=2 case
-	testRun(t, 3, 9, 10, 10000, 100)  // Standard f=3 case
-	testRun(t, 4, 12, 10, 10000, 100) // Standard f=4 case
-	testRun(t, 5, 15, 10, 10000, 100) // Standard f=10 case
+	testRun(t, 2, 6, 10, 100000, 100)  // Standard f=2 case
+	testRun(t, 3, 9, 10, 100000, 100)  // Standard f=3 case
+	testRun(t, 4, 12, 10, 100000, 100) // Standard f=4 case
+	testRun(t, 5, 15, 10, 100000, 100) // Standard f=10 case
 
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
-	testRun(t, 1, 3, 10, 10000, 2) // Extreme low-entropy: rarely commits
-	testRun(t, 1, 3, 10, 10000, 3) // A bit better bit still bad...
+	testRun(t, 1, 3, 10, 100000, 2) // Extreme low-entropy: rarely commits
+	testRun(t, 1, 3, 10, 100000, 3) // A bit better bit still bad...
 }

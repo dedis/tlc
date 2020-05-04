@@ -13,27 +13,28 @@ import (
 
 // Object to record the common total order and verify it for consistency
 type testOrder struct {
-	hs  []Head     // all history known to be committed so far
-	mut sync.Mutex // mutex protecting this reference order
+	hist []string   // all history known to be committed so far
+	mut  sync.Mutex // mutex protecting this reference order
 }
 
 // When a client reports a history h has been committed,
 // record that in the testOrder and check it for global consistency.
-func (to *testOrder) committed(t *testing.T, h Head) {
+func (to *testOrder) committed(t *testing.T, step int64, prop string) {
 	to.mut.Lock()
 	defer to.mut.Unlock()
 
 	// Ensure history slice is long enough
-	for h.Step >= Step(len(to.hs)) {
-		to.hs = append(to.hs, Head{})
+	for step >= int64(len(to.hist)) {
+		to.hist = append(to.hist, "")
 	}
 
 	// Check commit consistency across all concurrent clients
 	switch {
-	case to.hs[h.Step] == Head{}:
-		to.hs[h.Step] = h
-	case to.hs[h.Step] != h:
-		t.Errorf("UNSAFE at %v:\n%+v\n%+v", h.Step, h, to.hs[h.Step])
+	case to.hist[step] == "":
+		to.hist[step] = prop
+	case to.hist[step] != prop:
+		t.Errorf("Inconsistency at %v:\n old %q\n new %q",
+			step, to.hist[step], prop)
 	}
 }
 
@@ -46,14 +47,16 @@ func testCli(t *testing.T, self, f, maxstep, maxpri int,
 
 	// Our proposal function simply collects and consistency-checks
 	// committed Heads until a designated time-step is reached.
-	pr := func(i Node, L, C Head) (string, int64) {
+	pr := func(step int64, cur string, com bool) (string, int64) {
 		//fmt.Printf("cli %v saw commit %v %q\n", self, C.Step, C.Data)
 
 		// Consistency-check the history h known to be committed
-		to.committed(t, C)
+		if com {
+			to.committed(t, step, cur)
+		}
 
 		// Stop once we reach the step limit
-		if C.Step >= Step(maxstep) {
+		if step >= int64(maxstep) {
 			cancel()
 		}
 
@@ -64,7 +67,7 @@ func testCli(t *testing.T, self, f, maxstep, maxpri int,
 		// close to the full 64 bits.
 		pri := rand.Int63n(int64(maxpri))
 
-		return fmt.Sprintf("cli %v proposal %v", self, C.Step), pri
+		return fmt.Sprintf("cli %v proposal %v", self, step), pri
 	}
 
 	// Start the test client with appropriate parameters assuming
