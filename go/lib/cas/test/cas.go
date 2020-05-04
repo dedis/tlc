@@ -5,6 +5,7 @@ package test
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 
@@ -53,22 +54,28 @@ func (to *History) Observe(t *testing.T, version int64, value string) {
 // each goroutine should have its own Checked wrapper around that Store.
 //
 func Checked(t *testing.T, h *History, store cas.Store) cas.Store {
-	return &checkedStore{t, h, store}
+	return &checkedStore{t: t, h: h, s: store}
 }
 
 type checkedStore struct {
-	t *testing.T
-	h *History
-	s cas.Store
+	t *testing.T // Testing context
+	h *History   // History we're using for consistency-checking
+	s cas.Store  // Underlying compare-and-set Store
+
+	lver int64  // Last version number read from the underlying Store
+	lval string // Last value read from the underlying Store
+
+	rver int64 // Our fudged informational version numbers for testing
 }
 
 func (cs *checkedStore) CompareAndSet(ctx context.Context, old, new string) (
 	version int64, actual string, err error) {
 
-	//if lastVer != cs.lv {
-	//	cs.t.Errorf("Checked CAS store passed wrong last version")
-	//}
-
+	// Sanity-check the arguments we're passed
+	if old != cs.lval {
+		cs.t.Errorf("CompareAndSet: wrong old value %q != %q",
+			old, cs.lval)
+	}
 	if new == "" {
 		cs.t.Errorf("CompareAndSet: new value empty")
 	}
@@ -79,11 +86,29 @@ func (cs *checkedStore) CompareAndSet(ctx context.Context, old, new string) (
 	// Try to change old to new atomically.
 	version, actual, err = cs.s.CompareAndSet(ctx, old, new)
 
-	// Record all actual version/value pairs we observe.
+	// Sanity-check the Store-assigned version numbers
+	if version < cs.lver {
+		cs.t.Errorf("CompareAndSet: Store version number decreased")
+	}
+	if version == cs.lver && actual != cs.lval {
+		cs.t.Errorf("CompareAndSet: Store version failed to increase")
+	}
+
+	// Record and consistency-check all version/value pairs we observe.
 	cs.h.Observe(cs.t, version, actual)
 
+	// Produce our own informational version numbers to return
+	// that increase a bit unpredictability for testing purposes.
+	if version > cs.lver {
+		cs.rver++
+	}
+	cs.rver += rand.Int63n(3)
+
+	// Update our cached record of the underlying Store's last state
+	cs.lver, cs.lval = version, actual
+
 	// Return the actual new value regardless.
-	return version, actual, err
+	return cs.rver, actual, err
 }
 
 // Stores torture-tests one or more cas.Store interfaces

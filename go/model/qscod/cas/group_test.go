@@ -57,7 +57,7 @@ func TestClient(t *testing.T) {
 	testRun(t, 1, 3, 50, 1, 10)
 	testRun(t, 1, 3, 100, 1, 10)
 
-	testRun(t, 2, 6, 10, 10, 000) // Standard f=2 case
+	testRun(t, 2, 6, 10, 10, 000)  // Standard f=2 case
 	testRun(t, 3, 9, 10, 10, 100)  // Standard f=3 case
 	testRun(t, 4, 12, 10, 10, 100) // Standard f=4 case
 	testRun(t, 5, 15, 10, 10, 100) // Standard f=10 case

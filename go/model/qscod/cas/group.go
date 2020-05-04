@@ -20,7 +20,7 @@ type Group struct {
 	done bool           // set after group shutdown
 
 	// channel that CAS calls use to propose work to do
-	ch chan func(core.Step, string, bool) (string, int64)
+	ch chan func(int64, string, bool) (string, int64)
 }
 
 // Start initializes g to represent a consensus group comprised of
@@ -55,7 +55,7 @@ func (g *Group) Start(ctx context.Context, members []cas.Store, faulty int) *Gro
 	// Create a consensus group state instance
 	g.c = core.Client{Tr: Tr, Ts: Ts}
 	g.ctx = ctx
-	g.ch = make(chan func(s core.Step, p string, c bool) (string, int64))
+	g.ch = make(chan func(s int64, p string, c bool) (string, int64))
 
 	// Create a core.Store wrapper around each cas.Store group member
 	g.c.KV = make([]core.Store, N)
@@ -68,7 +68,7 @@ func (g *Group) Start(ctx context.Context, members []cas.Store, faulty int) *Gro
 	// and then we call that to form the proposal as appropriate.
 	// But we concurrently listen for channel cancellation
 	// and return promptly with a no-op proposal in that case.
-	g.c.Pr = func(s core.Step, p string, c bool) (prop string, pri int64) {
+	g.c.Pr = func(s int64, p string, c bool) (prop string, pri int64) {
 		for {
 			select {
 			case f := <-g.ch: // got a CAS work function to call
@@ -157,7 +157,7 @@ func (g *Group) CompareAndSet(ctx context.Context, old, new string) (
 	// Define the proposal formulation function that will do our work.
 	// Returns the empty string to keep this worker thread waiting
 	// for something to propose while letting other threads progress.
-	pr := func(s core.Step, cur string, com bool) (prop string, pri int64) {
+	pr := func(s int64, cur string, com bool) (prop string, pri int64) {
 		mut.Lock()
 		defer mut.Unlock()
 

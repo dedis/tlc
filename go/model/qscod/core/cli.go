@@ -47,7 +47,7 @@ type Store interface {
 
 // Value represents the values that a consensus node's key/value Store maps to.
 type Value struct {
-	S    int64   // TLC step number this broadcast value is for
+	S    int64  // TLC step number this broadcast value is for
 	P    string // Application data string for this proposal
 	I    int64  // Random integer priority for this proposal
 	R, B Set    // Read set and broadcast set from TLCB
@@ -117,9 +117,10 @@ func (S Set) best() (bn int, bv Value, bu bool) {
 // for maximum protection against denial-of-service attacks in the network.
 //
 type Client struct {
-	KV     []Store                                  // Node state key/value stores
-	Tr, Ts int                                      // Receive and spread thresholds
-	Pr     func(int64, string, bool) (string, int64) // Proposal function
+	KV     []Store // Per-node key/value state storage interfaces
+	Tr, Ts int     // Receive and spread threshold configuration
+
+	Pr func(int64, string, bool) (string, int64) // Proposal function
 
 	mut sync.Mutex // Mutex protecting this client's state
 }
