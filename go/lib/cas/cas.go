@@ -1,51 +1,47 @@
-// Package cas defines a simple versioned check-and-set (CAS) state interface.
+// Package cas defines a simple compare-and-set (CAS) state interface.
 // It defines a generic access interface called Store,
 // and a simple in-memory CAS register called Register.
-//
-// This CAS abstraction is functionally equivalent to classic compare-and-swap,
-// but slightly more efficient and robust because it compares version numbers,
-// which are always small and guaranteed to increase with each state change,
-// rather than comparing actual state contents, which are arbitrary strings.
 //
 package cas
 
 import (
 	"context"
-	//"errors"
 	"sync"
 )
 
-// Store defines a CAS storage abstraction via a single CheckAndSet method.
+// Store defines a CAS storage abstraction via a single CompareAndSet method.
 //
-// CheckAndSet writes a new version of the state containing value reqVal,
-// provided the state has not changed since prior version lastVer.
-// CheckAndSet then reads and returns the latest state version and value.
-// The version check and conditional write are guaranteed to be atomic,
+// CompareAndSet writes a proposed new value to the state,
+// provided the state still has the specified old value.
+// The compare and conditional write are guaranteed to be atomic,
 // ensuring that the caller can avoid undetected state loss due to races.
+// CompareAndSet then reads and returns the latest actual state value.
 //
-// When CheckAndSet succeeds in writing the caller's proposed value reqVal,
-// it returns actualVer > lastVer, actualVal == reqVal, and err == nil.
-// The Store assigns new version numbers, which must be increasing
-// but need not be consecutive.
-//
-// If the stored state had already advanced past version number lastVer,
-// CheckAndSet returns actualVer > lastVer, actualVal == the state value
-// associated with actualVer, and err == Changed.
-// The version number of the stored state may appear to increase at any time
-// even when the associated value has not changed.
-//
-// If CheckAndSet returns any error other than Changed, then it may return
-// actualVer == 0 and actualVal == "" to indicate the state couldn't be read.
-//
-// Version numbers are 64-bit integers, and values are arbitrary Go strings.
-// Value strings may contain binary data; the Store treats them as opaque.
+// State values are arbitrary opaque Go strings, and may contain binary data.
 // While values in principle have no particular length limit, in practice
 // Store implementations may expect them to be "reasonably small", i.e.,
 // efficient for storing metadata but not necessarily for bulk data storage.
 //
-// CheckAndSet takes a Context parameter so that long-running implementations,
+// The Store assigns a version number to each value CompareAndSet returns.
+// Version numbers must be monotonic but need not be assigned consecutively.
+// The version number must increase when the stored value changes,
+// and may increase at other times even when the value hasn't changed.
+// The caller may simply ignore the version numbers CompareAndSet returns,
+// or may use them for consistency-checking and debugging:
+// see the Checked wrapper function in the test subpackage for example.
+// Version numbers do not impose a burden on Store interface implementations,
+// in part because it's easy to adapt a non-versioned underlying CAS interface
+// with a simple wrapper that attaches a version number to each proposed value.
+//
+// CompareAndSet takes a Context parameter so that long-running implementations,
 // particularly those accessing remote storage in a distributed system,
 // can respond to cancellation requests and timeouts appropriately.
+// For robust asynchronous operation, CompareAndSet should return err != nil
+// only when its context is cancelled or when it encounters an error
+// that it detects to be permanent and unrecoverable for sure.
+// On encountering errors that may be temporary (e.g., due to network outages),
+// it is better for the Store to keep trying until success or cancellation,
+// using the lib/backoff package for example.
 //
 type Store interface {
 	CompareAndSet(ctx context.Context, old, new string) (
@@ -56,8 +52,8 @@ type Store interface {
 // It is thread-safe and ready for use on instantiation.
 type Register struct {
 	mut sync.Mutex // for synchronizing accesses
-	val string     // the latest value written
 	ver int64      // version number of the latest value
+	val string     // the latest value written
 }
 
 // CompareAndSet implements the Store interface for the CAS register.
@@ -76,6 +72,3 @@ func (r *Register) CompareAndSet(ctx context.Context, old, new string) (
 	return r.ver, r.val, nil
 }
 
-// CompareAndSet returns Changed when the stored value was changed
-// by someone else since the last version the caller indicated.
-//var Changed = errors.New("Version changed")

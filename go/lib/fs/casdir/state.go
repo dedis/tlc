@@ -1,4 +1,4 @@
-// Package cas implements a versioned check-and-set (CAS) state abstraction
+// Package casdir implements a versioned check-and-set (CAS) state abstraction
 // in a directory on a standard POSIX-compatible file system.
 //
 // See the tlc/go/lib/cas package for general information
@@ -9,7 +9,7 @@
 // To implement CAS, in essence, we simply expire old versions immediately
 // as soon as any new version is written.
 //
-package cas
+package casdir
 
 import (
 	"context"
@@ -17,34 +17,35 @@ import (
 	"github.com/dedis/tlc/go/lib/fs/verst"
 )
 
-// FileStore holds cached state for a single compare-and-set register.
+// Store implements the compare-and-set state abstraction
+// generically defined by the cas.Store interface,
+// holding the underlying state in a POSIX directory.
 //
-// A FileStore instance is intended for use by only one goroutine at a time,
+// The underlying state directory may be shared locally or remotely
+// (e.g., via NFS-mounted file systems),
+// provided that file system accesses ensure file-level POSIX atomicity.
+//
+// Each Store instance is intended for use by only one goroutine at a time,
 // so the client must synchronize shared uses across multiple goroutines.
 //
-type FileStore struct {
-	vs verst.State // underlying versioned state
-	lver int64	// last version we've read
-	lval string	// application value associated with lver
+type Store struct {
+	vs   verst.State // underlying versioned state
+	lver int64       // last version we've read
+	lval string      // application value associated with lver
 }
 
-// Initialize FileStore to refer to a CAS register at a given file system path.
-// If create is true, create the designated directory if it doesn't exist.
-// If excl is true, fail if the designated directory already exists.
-func (st *FileStore) Init(path string, create, excl bool) error {
+// Init sets Store to refer to a CAS register at a given file system path.
+// If create is true, creates the designated directory if it doesn't exist.
+// If excl is true, fails if the designated directory already exists.
+//
+func (st *Store) Init(path string, create, excl bool) error {
 	return st.vs.Init(path, create, excl)
 }
 
-// CompareAndSet conditionally writes a new version to the stored state,
-// then reads and returns the actual current state version and content.
+// CompareAndSet writes value new provided the state still holds value old,
+// then reads and returns the actual current state version and value.
 //
-// The write attempt succeeds only if the proposed version is strictly larger
-// than the latest version that has been written so far,
-// and otherwise silently does nothing without producing an error.
-// CompareAndSet returns a non-nil error only if an unexpected error occurred,
-// other than a simple race between multiple writers.
-//
-func (st *FileStore) CompareAndSet(ctx context.Context, old, new string) (
+func (st *Store) CompareAndSet(ctx context.Context, old, new string) (
 	version int64, actual string, err error) {
 
 	if old != st.lval {

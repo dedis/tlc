@@ -29,12 +29,12 @@ func (to *History) Observe(t *testing.T, version int64, value string) {
 	to.mut.Lock()
 	defer to.mut.Unlock()
 
-	// Create the successor map if it doesn't already exist
+	// Create the version/value map if it doesn't already exist
 	if to.hist == nil {
 		to.hist = make(map[int64]string)
 	}
 
-	// If there is any recorded successor to old, it had better be new.
+	// If there is a recorded value for this version, it must be the same.
 	if old, exist := to.hist[version]; exist && old != value {
 		t.Errorf("\nInconsistency:\n ver %v\n old %q\n new %q\n",
 			version, old, value)
@@ -49,9 +49,9 @@ func (to *History) Observe(t *testing.T, version int64, value string) {
 // reporting any inconsistency errors discovered via testing context t.
 //
 // The wrapper also consistency-checks the caller's accesses to the Store,
-// ensuring that the provided lastVer is indeed the last version retrieved.
+// e.g., that the provided old value is indeed the last version retrieved.
 // This means that when checking a Store that is shared across goroutines,
-// each goroutine should have its own Checked wrapper around that Store.
+// each goroutine must have its own Checked wrapper around that Store.
 //
 func Checked(t *testing.T, h *History, store cas.Store) cas.Store {
 	return &checkedStore{t: t, h: h, s: store}
