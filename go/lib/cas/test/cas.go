@@ -16,31 +16,31 @@ import (
 // and checks all these observations for consistency.
 //
 type History struct {
-	vs  []string   // all history known to be committed so far
-	mut sync.Mutex // mutex protecting this reference order
+	hist map[int64]string // version-value map defining observed history
+	mut  sync.Mutex       // mutex protecting this reference order
 }
 
-// Observe records a version/value pair that was observed via a cas.Store,
-// checks it for consistency against all prior recorded version/value pairs,
+// Observe records an old/new value pair that was observed via a cas.Store,
+// checks it for consistency against all prior recorded old/new value pairs,
 // and reports any errors via testing context t.
 //
-func (to *History) Observe(t *testing.T, ver int64, val string) {
+func (to *History) Observe(t *testing.T, version int64, value string) {
 	to.mut.Lock()
 	defer to.mut.Unlock()
 
-	// Ensure history slice is long enough
-	for ver >= int64(len(to.vs)) {
-		to.vs = append(to.vs, "")
+	// Create the successor map if it doesn't already exist
+	if to.hist == nil {
+		to.hist = make(map[int64]string)
 	}
 
-	// Check commit consistency across all concurrent clients
-	switch {
-	case to.vs[ver] == "":
-		to.vs[ver] = val
-	case to.vs[ver] != val:
-		t.Errorf("\nHistory inconsistency at %v:\nold: %+v\nnew: %+v",
-			ver, to.vs[ver], val)
+	// If there is any recorded successor to old, it had better be new.
+	if old, exist := to.hist[version]; exist && old != value {
+		t.Errorf("\nInconsistency:\n ver %v\n old %q\n new %q\n",
+			version, old, value)
 	}
+
+	// Record the new successor
+	to.hist[version] = value
 }
 
 // Checked wraps the provided CAS store with a consistency-checker
@@ -53,29 +53,37 @@ func (to *History) Observe(t *testing.T, ver int64, val string) {
 // each goroutine should have its own Checked wrapper around that Store.
 //
 func Checked(t *testing.T, h *History, store cas.Store) cas.Store {
-	return &checkedStore{t, h, store, 0}
+	return &checkedStore{t, h, store}
 }
 
 type checkedStore struct {
-	t  *testing.T
-	h  *History
-	s  cas.Store
-	lv int64
+	t *testing.T
+	h *History
+	s cas.Store
 }
 
-func (cs *checkedStore) CheckAndSet(
-	ctx context.Context, lastVer int64, reqVal string) (
-	actualVer int64, actualVal string, err error) {
+func (cs *checkedStore) CompareAndSet(ctx context.Context, old, new string) (
+	version int64, actual string, err error) {
 
-	if lastVer != cs.lv {
-		cs.t.Errorf("Checked CAS store passed wrong last version")
+	//if lastVer != cs.lv {
+	//	cs.t.Errorf("Checked CAS store passed wrong last version")
+	//}
+
+	if new == "" {
+		cs.t.Errorf("CompareAndSet: new value empty")
+	}
+	if new == old {
+		cs.t.Errorf("CompareAndSet: new value identical to old")
 	}
 
-	actualVer, actualVal, err = cs.s.CheckAndSet(ctx, lastVer, reqVal)
-	cs.h.Observe(cs.t, actualVer, actualVal)
+	// Try to change old to new atomically.
+	version, actual, err = cs.s.CompareAndSet(ctx, old, new)
 
-	cs.lv = actualVer
-	return actualVer, actualVal, err
+	// Record all actual version/value pairs we observe.
+	cs.h.Observe(cs.t, version, actual)
+
+	// Return the actual new value regardless.
+	return version, actual, err
 }
 
 // Stores torture-tests one or more cas.Store interfaces
@@ -91,12 +99,15 @@ func Stores(t *testing.T, nthreads, naccesses int, store ...cas.Store) {
 
 	tester := func(i, j int) {
 		cs := Checked(t, h, store[i])
-		var lastVer int64
+		old, err := "", error(nil)
 		for k := 0; k < naccesses; k++ {
-			reqVal := fmt.Sprintf("store %v thread %v access %v",
+			new := fmt.Sprintf("store %v thread %v access %v",
 				i, j, k)
 			//println("tester", i, j, "access", k)
-			lastVer, _, _ = cs.CheckAndSet(bg, lastVer, reqVal)
+			_, old, err = cs.CompareAndSet(bg, old, new)
+			if err != nil {
+				t.Error("CompareAndSet: " + err.Error())
+			}
 		}
 		//println("tester", i, j, "done")
 		wg.Done()

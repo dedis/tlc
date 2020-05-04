@@ -11,9 +11,9 @@ import (
 // based on a cas.Store interface.
 type coreStore struct {
 	cas.Store            // underlying CAS state store
-	g         *group     // group this store is associated with
-	lver      int64      // last underlying CAS version we wrote and read back
-	lval      core.Value // last value we read with lver
+	g         *Group     // group this store is associated with
+	lvals     string     // last value we observed in the underlying Store
+	lval      core.Value // deserialized last value
 }
 
 func (cs *coreStore) WriteRead(v core.Value) (rv core.Value) {
@@ -31,6 +31,7 @@ func (cs *coreStore) WriteRead(v core.Value) (rv core.Value) {
 		// The group's context got cancelled,
 		// so just silently return nil Values
 		// until the consensus worker threads catch up and terminate.
+		//println("WriteRead cancelled")
 		return core.Value{}
 	}
 	if err != nil {
@@ -51,12 +52,12 @@ func (cs *coreStore) tryWriteRead(val core.Value) (core.Value, error) {
 
 	// Try to set the underlying CAS register to the proposed value
 	// only as long as doing so would strictly increase its TLC step
-	for val.P.Step > cs.lval.P.Step {
+	for val.S > cs.lval.S {
 
 		// Write the serialized value to the underlying CAS interface
-		aver, avals, err := cs.CheckAndSet(cs.g.ctx, cs.lver, vals)
-		if err != nil && err != cas.Changed {
-			println("CheckAndSet error", err.Error())
+		_, avals, err := cs.CompareAndSet(cs.g.ctx, cs.lvals, vals)
+		if err != nil {
+			println("CompareAndSet error", err.Error())
 			return core.Value{}, err
 		}
 
@@ -68,16 +69,18 @@ func (cs *coreStore) tryWriteRead(val core.Value) (core.Value, error) {
 		}
 
 		//		println("tryWriteRead step",
-		//			cs.lval.P.Step, "w", val.P.Step, "->", aval.P.Step,
+		//			cs.lval.S, "w", val.S, "->", aval.S,
 		//			"casver", cs.lver, "->", aver)
 
-		if aval.P.Step <= cs.lval.P.Step {
+		if aval.S <= cs.lval.S {
 			panic("CAS failed to advance TLC step!")
 		}
 
 		// Update our record of the underlying CAS version and value
-		cs.lver, cs.lval = aver, aval
+		//println("update from step", cs.lval.S, "to step", aval.S)
+		cs.lvals, cs.lval = avals, aval
 	}
 
+	//println("cs returning newer step", cs.lval.S)
 	return cs.lval, nil
 }

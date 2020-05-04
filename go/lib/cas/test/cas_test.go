@@ -8,5 +8,5 @@ import (
 
 // Test the Client with a trivial in-memory key/value Store implementation.
 func TestRegister(t *testing.T) {
-	TestStore(t, 100, 100000, &cas.Register{})
+	Stores(t, 100, 100000, &cas.Register{})
 }

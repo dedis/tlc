@@ -11,7 +11,7 @@ package cas
 
 import (
 	"context"
-	"errors"
+	//"errors"
 	"sync"
 )
 
@@ -31,6 +31,8 @@ import (
 // If the stored state had already advanced past version number lastVer,
 // CheckAndSet returns actualVer > lastVer, actualVal == the state value
 // associated with actualVer, and err == Changed.
+// The version number of the stored state may appear to increase at any time
+// even when the associated value has not changed.
 //
 // If CheckAndSet returns any error other than Changed, then it may return
 // actualVer == 0 and actualVal == "" to indicate the state couldn't be read.
@@ -46,36 +48,34 @@ import (
 // can respond to cancellation requests and timeouts appropriately.
 //
 type Store interface {
-	CheckAndSet(ctx context.Context, lastVer int64, reqVal string) (
-		actualVer int64, actualVal string, err error)
+	CompareAndSet(ctx context.Context, old, new string) (
+		version int64, actual string, err error)
 }
 
 // Register implements a simple local-memory CAS register.
 // It is thread-safe and ready for use on instantiation.
 type Register struct {
 	mut sync.Mutex // for synchronizing accesses
-	ver int64      // the latest version number
 	val string     // the latest value written
+	ver int64      // version number of the latest value
 }
 
-// CheckAndSet implements the Store interface for the CAS register.
-func (r *Register) CheckAndSet(
-	ctx context.Context, lastVer int64, reqVal string) (
-	actualVer int64, actualVal string, err error) {
+// CompareAndSet implements the Store interface for the CAS register.
+func (r *Register) CompareAndSet(ctx context.Context, old, new string) (
+	version int64, actual string, err error) {
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
-	// If the version doesn't match, just return the latest version.
-	if r.ver != lastVer {
-		return r.ver, r.val, Changed
+	// Update the value only if the current value is as expected.
+	if r.val == old {
+		r.ver, r.val = r.ver+1, new
 	}
 
-	// Write and return the new version
-	r.ver, r.val = lastVer+1, reqVal
+	// Return the actual new value, changed or not.
 	return r.ver, r.val, nil
 }
 
-// CheckAndSet returns Changed when the stored value was changed
+// CompareAndSet returns Changed when the stored value was changed
 // by someone else since the last version the caller indicated.
-var Changed = errors.New("Version changed")
+//var Changed = errors.New("Version changed")

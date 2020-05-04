@@ -13,7 +13,7 @@
 //
 package core
 
-import "fmt"
+//import "fmt"
 import "sync"
 import "context"
 
@@ -21,20 +21,20 @@ type Node int   // Node represents a node number from 0 through n-1
 type Step int64 // Step represents a TLC time-step counting from 0
 
 // Head represents a view of history proposed by some node in a QSC round.
-type Head struct {
-	Step Step   // TLC time-step of last successful commit in this view
-	Data string // Application data committed at that step in this view
-}
+//type Head struct {
+//	Step Step   // TLC time-step of last successful commit in this view
+//	Data string // Application data committed at that step in this view
+//}
 
 // Store represents an interface to one of the n key/value stores
 // representing the persistent state of each of the n consensus group members.
 // A Store's keys are integer TLC time-steps,
 // and its values are Value structures.
 //
-// WriteRead(step, value) attempts to write tv to the store at step v.P.Step,
+// WriteRead(step, value) attempts to write tv to the store at step v.S,
 // returning the first value written by any client.
 // WriteRead may also return a value from any higher time-step,
-// if other clients have moved the store's state beyond v.P.Step.
+// if other clients have moved the store's state beyond v.S.
 //
 // This interface intentionally provides no means to return an error.
 // If WriteRead encounters an error that might be temporary or recoverable,
@@ -56,21 +56,28 @@ type Store interface {
 
 // Value represents the values that a consensus node's key/value Store maps to.
 type Value struct {
-	I       int64 // Random integer priority for this proposal
-	L, C, P Head  // Last and current commit, and proposed history views
-	R, B    Set   // Read set and broadcast set from TLCB
+	S Step
+	P string
+	I int64 // Random integer priority for this proposal
+	//	L, C, P Head  // Last and current commit, and proposed history views
+	//	P Head  // Proposed view of history
+	R, B Set // Read set and broadcast set from TLCB
 }
 
 // Set represents a set of proposed values from the same time-step.
 type Set map[Node]Value
 
-// best returns some maximum-priority history in a Set,
+// best returns some maximum-priority Value in a Set,
 // together with a flag indicating whether the returned history
 // is uniquely the best, i.e., the set contains no history tied for best.
 func (S Set) best() (bn Node, bv Value, bu bool) {
 	for n, v := range S {
 		if v.I >= bv.I {
-			bn, bv, bu = n, v, v.I > bv.I
+			// A new best value is unique (so far)
+			// if its priority is strictly higher than the last,
+			// or if it has equal priority, was unique so far,
+			// and is proposing identical application data.
+			bn, bv, bu = n, v, v.I > bv.I || (bu && v.P == bv.P)
 		}
 	}
 	return bn, bv, bu
@@ -120,17 +127,18 @@ func (S Set) best() (bn Node, bv Value, bu bool) {
 // for maximum protection against denial-of-service attacks in the network.
 //
 type Client struct {
-	KV     []Store                // Node state key/value stores
-	Tr, Ts int                    // Receive and spread thresholds
-	Pr     func(i Node, L, C Head) (string, int64) // Proposal function
-//	RV	func() int64	// Random priority generator
+	KV     []Store                                  // Node state key/value stores
+	Tr, Ts int                                      // Receive and spread thresholds
+	Pr     func(Step, string, bool) (string, int64) // Proposal function
+	//	RV	func() int64	// Random priority generator
 
 	mut sync.Mutex // Mutex protecting this client's state
 }
 
 type work struct {
-	kvc  Set        // Key/value cache collected for this time-step
 	cond *sync.Cond // For awaiting threshold conditions
+	val  Value      // Value template each worker will try to write
+	kvc  Set        // Key/value cache collected for this time-step
 	max  Value      // Value with highest time-step we must catch up to
 	next *work      // Forward pointer to next work item
 }
@@ -146,119 +154,61 @@ func (c *Client) Run(ctx context.Context) (err error) {
 	defer c.mut.Unlock()
 
 	// Launch one client thread to drive each of the n consensus nodes.
-	lw := &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
+	w := &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
 	for i := range c.KV {
-		go c.thread(ctx, Node(i), 0, Value{}, lw)
+		go c.worker(Node(i), w)
 	}
 
 	// Drive consensus state forever or until our context gets cancelled.
-	for ctx.Err() == nil {
-
-		// Set the next work-item in the current last work-item.
-		lw.next = &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
-
-		// Wake up any threads waiting for a next item to appear
-		lw.cond.Broadcast()
+	for ; ctx.Err() == nil; w = w.next {
 
 		// Wait for a threshold number of worker threads
-		// to complete the last work item
-		for len(lw.kvc) < c.Tr {
-			lw.cond.Wait()
+		// to complete the current work-item
+		for len(w.kvc) < c.Tr {
+			w.cond.Wait()
 		}
 
-		// Move on to process the next work item
-		lw = lw.next
-	}
+		//str := fmt.Sprintf("at %v kvc contains:", w.val.S)
+		//for i, v := range w.kvc {
+		//	str += fmt.Sprintf(
+		//		"\n node %v step %v data %q pri %v R %v B %v",
+		//		i, v.S, v.P, v.I, len(v.R), len(v.B))
+		//}
+		//println(str)
 
-	// Signal the worker threads to terminate with an all-nil work-item
-	lw.next = &work{}
-	lw.cond.Broadcast()
+		// Set the next work-item pointer in the current work-item,
+		// so that the worker threads know there will be a next item.
+		w.next = &work{kvc: make(Set), cond: sync.NewCond(&c.mut)}
 
-	// Any slow client threads will continue in the background
-	// until they catch up with the others or successfully get cancelled.
-	return ctx.Err()
-}
-
-// thread represents the main loop of a client's thread
-// that represents and drives a particular consensus group node.
-func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *work) {
-
-	c.mut.Lock() // Keep state locked while we're not waiting
-
-	// Process work-items defined by the main thread in sequence,
-	// terminating when we encounter a work-item with a nil kvc.
-	for ; lw.kvc != nil; lw = lw.next {
-
-		if lv.P.Step < ls {
-			println("lv at", lv.P.Step, "should be", ls)
-		}
-
-		// Collect a threshold number of last-step values in lw.kvc,
-		// after which work-item lw will be considered complete.
-		// Don't modify kvc or max after reaching the threshold tr,
-		// because other code expects these to be immutable afterwards.
-		if len(lw.kvc) < c.Tr {
-
-			// Save the actual value read into our local cache
-			lw.kvc[node] = lv
-
-			// Track the highest last-step value read on any node,
-			// which may be higher than the one we tried to write
-			// if we need to catch up with a faster node.
-			if lv.P.Step > lw.max.P.Step {
-				lw.max = lv
-			}
-		}
-
-		// Wait until the main thread has created a next work item,
-		// and until we have reached the receive threshold.
-		for lw.next == nil || len(lw.kvc) < c.Tr {
-			lw.cond.Wait()
-		}
-
-		// Wake up everyone else once we reach the receive threshold
-		lw.cond.Broadcast()
-
-		str := fmt.Sprintf("%v kvc at %v contains:\n", node, ls)
-		for i, v := range lw.kvc {
-			str += fmt.Sprintf("%v step %v data %q pri %v C step %v data %q \n",
-				i, v.P.Step, v.P.Data, v.I, v.C.Step, v.C.Data)
-		}
-		println(str)
+		// Wake up worker threads waiting for a next item to appear
+		w.cond.Broadcast()
 
 		// Decide on the next step number and value to broadcast,
 		// based on the threshold set we collected,
 		// which is now immutable and consistent across threads.
-		s, v := ls+1, Value{L: lv.L, C: lv.C, P: Head{Step: ls + 1}}
+		//		v := Value{P:Head{Step:w.max.S+1}}
+		nv := &w.next.val
+		//		v.S = w.max.S+1
+		nv.S = w.val.S + 1
 		switch {
-		case ctx.Err() != nil:
 
-			// The client Run's context has been cancelled.
-			// The worker threads should now do nothing
-			// except catch up to the final work-item,
-			// releasing other threads waiting on the kvc threshold
-			// along the way until all catch up and can terminate.
-			println("context cancelled")
-			continue
+		case w.max.S > w.val.S:
 
-		case lw.max.P.Step > ls:
-
-			// The last work-item failed to reach the threshold
-			// because some node had already reached a higher step.
+			// Some node already reached a higher time-step.
 			// Our next work item is simply to catch up all nodes
 			// at least to the highest-known step we discovered.
-			println(node, "catching up from", ls, "to", lw.max.P.Step)
-			s, v = lw.max.P.Step, lw.max
+			//println("catching up from", w.val.S, "to", w.max.S)
+			*nv = w.max
 
-		case (ls & 1) == 0: // completing an even-numbered step
+		case (w.val.S & 1) == 0: // finishing even-numbered step
 
 			// Complete the first TLCR broadcast
 			// and start the second within a TLCB round.
 			// The value for the second broadcsast is simply
-			// the (any) threshold receive set from the first.
-			v.R = lw.kvc
+			// the threshold receive set from the first.
+			nv.R = w.kvc
 
-		case (ls & 3) == 1:
+		case (w.val.S & 3) == 1:
 
 			// Complete the first TLCB call in a QSCOD round
 			// and start the second TLCB call for the round.
@@ -266,22 +216,22 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 			// Calculate valid potential (still tentative)
 			// R and B sets from the first TLCB call in this round,
 			// and include them in the second TLCB broadcast.
-			R0, B0 := c.tlcbRB(lw.kvc)
+			R0, B0 := c.tlcbRB(w.kvc)
 
 			// Pick any best confirmed proposal from B0
-			// as this node's broadcast for the second TLCB round.
+			// as our broadcast for the second TLCB round.
 			_, v2, _ := B0.best()
 
 			// Set the value for the second TLCB call to broadcast
-			v.I, v.R, v.B = v2.I, R0, B0
+			nv.I, nv.R, nv.B = v2.I, R0, B0
 
-		case (ls & 3) == 3:
+		case (w.val.S & 3) == 3:
 
 			// Complete a prior QSCOD round and start a new one.
 
 			// First, calculate valid potential R2 and B2 sets from
 			// the second TLCB call in the completed QSCOD round.
-			R2, B2 := c.tlcbRB(lw.kvc)
+			R2, B2 := c.tlcbRB(w.kvc)
 
 			// We always adopt some best confirmed proposal from R2
 			// as our own (still tentative so far) view of history.
@@ -301,53 +251,115 @@ func (c *Client) thread(ctx context.Context, node Node, ls Step, lv Value, lw *w
 			// This test may succeed only for some nodes in a round.
 			// If b is uniquely-best in R0 we can compare priorities
 			// to see if two values are the same node's proposal.
-//			// Never commit proposals that don't change the Data,
-//			// since we use those to represent "no-op" proposals.
-			if u0 && b0.I == b2.I && b0.I == B2[n0].I { //&&
-//				b0.P.Data != v.C.Data {
+			//			// Never commit proposals that don't change the Data,
+			//			// since we use those to represent "no-op" proposals.
+			com := u0 && b0.I == b2.I && b0.I == B2[n0].I
+			if com {
+				//			if u0 && b0.I == b2.I && b0.I == B2[n0].I &&
+				//				b0.P.Data != v.C.Data
 
 				// b0.P is the original proposal with data,
 				// which becomes the new current commit C.
 				// The previous current commit
 				// becomes the last commit L.
-				println(node, "committed", b0.P.Step,
-					"on", v.C.Step, "data", b0.P.Data)
-				v.L, v.C = v.C, b0.P
+				//println("committed", b0.S, "data", b0.P)
+				//				v.L, v.C = v.C, b0.P
 			}
 
 			// Set the value for the first TLCB call
 			// in the next QSCOD round to broadcast,
 			// containing a proposal for the next round.
-			v.P.Data, v.I = c.Pr(node, v.L, v.C)
+			nv.P, nv.I = c.Pr(b0.S, b0.P, com)
 		}
 
-		if v.P.Step <= ls || v.P.Step < lw.max.P.Step {
-			println("no progress: ls", ls, "lv", lw.max.P.Step,
-				"to", v.P.Step)
+		//fmt.Printf("at %v next step %v pri %v prop %q R %v B %v\n",
+		//	w.val.S, nv.S, nv.I, nv.P, len(nv.R), len(nv.B))
+
+		if nv.S < w.max.S {
+			println("no progress: s", w.val.S, "lv", w.max.S,
+				"to", nv.S)
 		}
-		if v.P.Step != s {
-			println("value has wrong step!?", v.P.Step, s)
-		}
+	}
+
+	// Signal the worker threads to terminate with an all-nil work-item
+	w.next = &work{}
+	w.cond.Broadcast()
+
+	// Any slow client threads will continue in the background
+	// until they catch up with the others or successfully get cancelled.
+	return ctx.Err()
+}
+
+// worker handles a goroutine dedicated to submitting WriteRead requests
+// to each consensus group node asynchronously without delaying the main thread.
+//
+// We could in principle launch a separate goroutine per node each time step,
+// which would be even simpler to manage and provide higher parallelism.
+// But this would risk creating a ton of outstanding concurrent goroutines
+// trying to access the same slow node(s) and overloading those nodes further,
+// or creating local resource pressures such as too many open file descriptors
+// in case each WriteRead call opens a new file descriptor or socket, etc.
+// So we have only one worker per consensus group node do everything serially,
+// limiting resource usage while protecting the main thread from slow nodes.
+//
+func (c *Client) worker(node Node, w *work) {
+
+	// Keep Client state locked while we're not waiting
+	c.mut.Lock()
+
+	// Process work-items defined by the main thread in sequence,
+	// terminating when we encounter a work-item with a nil kvc.
+	for ; w.kvc != nil; w = w.next {
+
+		//		// Pull the next Value template we're supposed to write
+		//		v := w.val
+
+		//		// In steps that start a new QSC round with new proposals,
+		//		// each node gets its own independent random priority
+		//		// even when they're proposals of the same application value.
+		//		if (v.S & 3) == 0 {
+		//			v.I = c.RV()
+		//		}
+
+		//println(w, "before WriteRead step", w.val.S)
 
 		// Try to write new value, then read whatever the winner wrote.
-		// But don't write any state changes if our kvc has been
-		// contaminated with values from future time-steps.
 		c.mut.Unlock()
-		v = c.KV[node].WriteRead(v)
+		v := c.KV[node].WriteRead(w.val)
 		c.mut.Lock()
 
-		if v.P.Step < s {
-			println("read back value from wrong step", v.P.Step, s)
+		//println(w, "after WriteRead step", w.val.S, "read", v.S)
+
+		//if v.S < w.val.S {
+		//	println("read back value from old step", v.S, w.val.S)
+		//}
+
+		// Collect a threshold number of last-step values in w.kvc,
+		// after which work-item w will be considered complete.
+		// Don't modify kvc or max after reaching the threshold tr,
+		// because they are expected to be immutable afterwards.
+		if len(w.kvc) < c.Tr {
+
+			// Record the actual value read in the work-item
+			w.kvc[node] = v
+
+			// Track the highest last-step value read on any node,
+			// which may be higher than the one we tried to write
+			// if we need to catch up with a faster node.
+			if v.S > w.max.S {
+				w.max = v
+			}
+
+			// Wake up the main thread when we reach the threshold
+			if len(w.kvc) == c.Tr {
+				w.cond.Broadcast()
+			}
 		}
 
-		// Note that the newly-returned value v
-		// may be from a higher time-step than expected (s).
-		// We'll deal with that above in the next iteration.
-		// The returned value v can also be Value{}
-		// but only after our context ctx has been cancelled.
-
-		// Proceed to the next work item
-		ls, lv = s, v
+		// Wait until the main thread has created a next work-item.
+		for w.next == nil {
+			w.cond.Wait()
+		}
 	}
 
 	c.mut.Unlock()

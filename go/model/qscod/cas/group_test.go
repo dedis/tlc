@@ -37,7 +37,7 @@ func testRun(t *testing.T, nfail, nnode, nclients, nthreads, naccesses int) {
 					members[i])
 			}
 
-			clients[i] = Group(ctx, checkers, nfail)
+			clients[i] = (&Group{}).Start(ctx, checkers, nfail)
 		}
 
 		// Run a standard torture-test across all the clients
@@ -57,12 +57,12 @@ func TestClient(t *testing.T) {
 	testRun(t, 1, 3, 50, 1, 10)
 	testRun(t, 1, 3, 100, 1, 10)
 
-	testRun(t, 2, 6, 10, 10, 1000)  // Standard f=2 case
-	testRun(t, 3, 9, 10, 10, 1000)  // Standard f=3 case
-	testRun(t, 4, 12, 10, 10, 1000) // Standard f=4 case
-	testRun(t, 5, 15, 10, 10, 1000) // Standard f=10 case
+	testRun(t, 2, 6, 10, 10, 000) // Standard f=2 case
+	testRun(t, 3, 9, 10, 10, 100)  // Standard f=3 case
+	testRun(t, 4, 12, 10, 10, 100) // Standard f=4 case
+	testRun(t, 5, 15, 10, 10, 100) // Standard f=10 case
 
 	// Test with low-entropy tickets: hurts commit rate, but still safe!
-	testRun(t, 1, 3, 10, 10, 100) // Extreme low-entropy: rarely commits
-	testRun(t, 1, 3, 10, 10, 100) // A bit better bit still bad...
+	testRun(t, 1, 3, 10, 10, 1000) // Extreme low-entropy: rarely commits
+	testRun(t, 1, 3, 10, 10, 1000) // A bit better bit still bad...
 }
