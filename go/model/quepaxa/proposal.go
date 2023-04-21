@@ -1,5 +1,11 @@
 package quepaxa
 
+import (
+	"crypto/rand"
+	"encoding/binary"
+	"math"
+)
+
 // The Proposal interface defines constraints for a concrete proposal type P.
 //
 // The Rank method must return the same proposal with rank set appropriately:
@@ -16,19 +22,66 @@ type Proposal[P any] interface {
 	EqD(other P) bool                 // equality for deciding
 }
 
-//type Proposal[D any] struct {
-//	R Rank			// random rank to prioritize this proposal
-//	I Node			// identity of initial proposing replica
-//	D Data			// decision data associated with proposal
-//}
+// BasicProposal provides a basic proposal design
+// that represents a reasonable "sweet spot" for most purposes.
+//
+// Proposals are randomly ranked using 31 bits of private randomness,
+// drawn from the cryptographic random source for strong unpredictability,
+// which might conceivably be needed to protect against a strong DoS attacker.
+// Since 31-bit random ranks do not have high entropy,
+// BasicProposal uses recorder numbers for breaking ties.
+//
+// BasicProposal contains a field D of parameterized type Data,
+// containing any application-defined data associated with the proposal.
+// This type may contain pointers or slices (e.g., referring to bulk data)
+// provided the referenced data objects do not change during consensus.
+// The BasicProposal does nothing with this data field other than copy it.
+type BasicProposal[Data any] struct {
+	R uint32 // Randomzed rank or priority
+	N Node   // Replica for which proposal was created
+	D Data   // Application-defined data
+}
 
-//func (x Proposal[D]).Cmp(y Proposal[D]) bool {
-//	switch {
-//	case x.R < y.R || (x.R == y.R && x.I < y.I):
-//		return -1
-//	case x.R > y.R || (x.R == y.R && x.I > y.I):
-//		return 1
-//	default:
-//		return 0
-//	}
-//}
+const basicProposalHighRank = math.MaxUint32
+
+func (_ BasicProposal[D]) Nil() BasicProposal[D] {
+	return BasicProposal[D]{}
+}
+
+func (p BasicProposal[D]) Best(o BasicProposal[D]) BasicProposal[D] {
+	if o.R > p.R || (o.R == p.R && o.N > p.N) {
+		return o
+	}
+	return p
+}
+
+func (p BasicProposal[D]) Rank(node Node, leader bool) BasicProposal[D] {
+
+	// record the replica number that this proposal was produced for
+	p.N = node
+
+	if leader {
+		// the leader always uses the reserved maximum rank
+		p.R = basicProposalHighRank
+
+	} else {
+		// read 32 bits of randomness
+		var b [4]byte
+		_, err := rand.Read(b[:])
+		if err != nil {
+			panic("unable to read cryptographically random bits: " +
+				err.Error())
+		}
+
+		// produce a 31-bit rank, avoiding the zero rank
+		p.R = (binary.BigEndian.Uint32(b[:]) & 0x7fffffff) + 1
+	}
+	return p
+}
+
+func (p BasicProposal[D]) EqD(o BasicProposal[D]) bool {
+	return p.R == o.R && p.N == o.N
+}
+
+var bp BasicProposal[struct{}]
+var prop Proposer[BasicProposal[struct{}]]

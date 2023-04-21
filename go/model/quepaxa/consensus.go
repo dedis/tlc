@@ -3,14 +3,11 @@ package quepaxa
 import (
 	"context"
 	"sync"
-	//	"github.com/dedis/tlc/go/model/quepaxa/isr"
 )
 
 type Node int32
 type Choice int64
 type Step int32
-
-//const Decided = Step(math.MaxInt32)
 
 // A logical time consists of
 // a Choice (consensus decision or slot number) and
@@ -24,10 +21,6 @@ type Time struct {
 func (t1 Time) LT(t2 Time) bool {
 	return t1.c < t2.c || (t1.c == t2.c && t1.s < t2.s)
 }
-
-//type integer interface {
-//	~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64
-//}
 
 type Replica[P Proposal[P]] interface {
 	Record(ctx context.Context, t Time, p P) (
